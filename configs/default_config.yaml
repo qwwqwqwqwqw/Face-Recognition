@@ -1,0 +1,148 @@
+# 人脸识别项目配置示例 (按模型/损失函数组合分组)
+
+# --- 全局设置 (适用于所有模式，通常不需要频繁修改) ---
+# 这些参数会作为基础配置加载，下方选中的配置块会覆盖这里的同名参数。
+# 命令行参数 (--param value) 的优先级最高，会覆盖所有配置。
+use_gpu: true         # 是否使用GPU，命令行参数 --use_gpu / --no-use_gpu 可覆盖
+seed: 42              # 随机种子
+image_size: 64        # 图像预处理统一尺寸，训练和推理时必须一致
+data_dir: 'data'              # 数据集根目录
+class_name: 'face'            # 当前使用的数据集子目录名
+model_save_dir: 'model'       # 模型保存目录
+num_classes: 5        # 数据集中的总身份类别数 (必须根据实际数据集修改!)
+log_interval: 10      # 训练日志打印间隔 (Batch)
+resume: null          # 是否从检查点恢复训练。null: 检查点存在则自动恢复。true: 强制恢复。false: 强制从头开始。命令行参数 --resume / --no-resume 可覆盖。
+# infer.py 和 face_compare.py 的可视化开关，如果希望统一控制可以放这里
+# visualize_results: false
+
+
+# --- 活动配置选择 (修改这里的 'active_config' 的值来切换要使用的配置块) ---
+# 脚本会根据这里的设置，从下方对应的配置块中加载训练、模型、损失函数等参数。
+# 请确保下方存在与此名称对应的配置块。
+active_config: 'vgg_ce_config' # 可选项: 'vgg_ce_config', 'resnet_ce_config', 'resnet_arcface_config'
+
+
+# --- VGG + CrossEntropy 配置块 ---
+# 如果要使用此配置进行训练，请将上面的 active_config 改为 'vgg_ce_config'
+vgg_ce_config:
+  # --- 模型类型和损失函数 (代码根据此判断) ---
+  model_type: 'vgg'
+  loss_type: 'cross_entropy' # 显式指定损失函数类型
+
+  # --- 训练超参数 ---
+  # train: # 保持层级结构清晰，或者直接在上一层定义
+  batch_size: 64 # 示例：VGG的batch_size
+  epochs: 80
+  learning_rate: 0.001
+  optimizer_type: 'Momentum'
+  optimizer_params:
+    momentum: 0.9
+    weight_decay: 0.0005
+  lr_scheduler_type: 'CosineAnnealingDecay'
+  lr_scheduler_params:
+    T_max: 80 # 通常等于 epochs
+
+  # --- VGG 特定参数 ---
+  model:
+    vgg_params: # 与ResNet的resnet_params结构对应
+      dropout_rate: 0.5
+
+  # --- 损失函数参数 (CrossEntropy 通常没有特定参数需要调优) ---
+  # loss:
+  #   cross_entropy_params: {}
+
+  # --- 推理/对比/建库 参数 ---
+  infer:
+    label_file: 'data/face/readme.json'
+    face_library_path: ''
+    recognition_threshold: 0.0
+    infer_visualize: false
+  compare:
+    compare_threshold: 0.8
+    compare_visualize: false
+  create_library:
+    output_library_path: 'model/face_library_vgg_ce.pkl'
+
+
+# --- ResNet + CrossEntropy 配置块 ---
+# 如果要使用此配置进行训练，请将上面的 active_config 改为 'resnet_ce_config'
+resnet_ce_config:
+  # --- 模型类型和损失函数 ---
+  model_type: 'resnet'
+  loss_type: 'cross_entropy'
+
+  # --- ResNet 骨干参数 ---
+  model:
+    resnet_params:
+      feature_dim: 512
+      nf: 32
+      n_resnet_blocks: 3 # 与 resnet_arcface_config 中的参数名统一
+
+  # --- 训练超参数 ---
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.000001 # 使用您之前修改的值
+  optimizer_type: 'AdamW'
+  optimizer_params:
+    weight_decay: 0.0001
+  lr_scheduler_type: 'CosineAnnealingDecay'
+  lr_scheduler_params:
+    T_max: 100
+
+  # --- 推理/对比/建库 参数 ---
+  infer:
+    label_file: 'data/face/readme.json'
+    face_library_path: ''
+    recognition_threshold: 0.0
+    infer_visualize: false
+  compare:
+    compare_threshold: 0.8
+    compare_visualize: false
+  create_library:
+    output_library_path: 'model/face_library_resnet_ce.pkl'
+
+
+# --- ResNet + ArcFace 配置块 ---
+# 如果要使用此配置进行训练，请将上面的 active_config 改为 'resnet_arcface_config'
+resnet_arcface_config: # <-- 当前 active_config 指向这里
+  # --- 模型类型和损失函数 ---
+  model_type: 'resnet'
+  loss_type: 'arcface'
+
+  # --- ResNet 骨干参数 ---
+  model:
+    resnet_params:
+      feature_dim: 512 # 特征维度
+      nf: 32
+      n_resnet_blocks: 3 # 与 resnet_ce_config 中的参数名统一
+
+  # --- ArcFace Loss 参数 ---
+  loss:
+    arcface_params:
+      arcface_m1: 1.0
+      arcface_m2: 0.5 # 关键调优参数 m
+      arcface_m3: 0.0
+      arcface_s: 64.0 # 关键调优参数 s
+
+  # --- 训练超参数 ---
+  batch_size: 32
+  epochs: 100
+  learning_rate: 0.001
+  optimizer_type: 'AdamW'
+  optimizer_params:
+    weight_decay: 0.0001
+  lr_scheduler_type: 'CosineAnnealingDecay'
+  lr_scheduler_params:
+    T_max: 100
+
+  # --- 推理/对比/建库 参数 ---
+  infer:
+    face_library_path: 'model/face_library_resnet_arcface.pkl'
+    recognition_threshold: 0.5
+    label_file: 'data/face/readme.json'
+    infer_visualize: false
+  compare:
+    compare_threshold: 0.8
+    compare_visualize: false
+  create_library:
+    output_library_path: 'model/face_library_resnet_arcface.pkl'
