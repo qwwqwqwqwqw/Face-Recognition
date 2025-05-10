@@ -1,148 +1,328 @@
-# 人脸识别项目配置示例 (按模型/损失函数组合分组)
+# === 人脸识别项目配置 YAML 文件 ===
+# 本文件用于集中管理项目的所有可配置参数。
+# 通过修改此文件，可以调整模型结构、训练超参数、数据路径、推理行为等。
+#
+# --- 文件结构说明 ---
+# 1.  `global_settings`: 包含适用于项目所有部分的全局参数。
+#     这些参数首先被加载，可以被后续的特定配置块覆盖。
+# 2.  `active_config`: 字符串，指定当前要激活哪个详细配置块。
+#     例如，设置为 \'resnet_arcface_config\' 将加载下面同名的配置块。
+# 3.  具体配置块 (例如 `vgg_ce_config`, `resnet_arcface_config`):
+#     每个块针对一种特定的实验设置（如模型骨干+损失函数的组合）。
+#     块内的参数会覆盖 `global_settings` 中的同名参数。
+#
+# --- 参数覆盖规则 ---
+# 1.  `global_settings` 作为基础。
+# 2.  `active_config` 指定的配置块中的参数覆盖 `global_settings`。
+# 3.  通过命令行传递的参数 (例如 `python train.py --learning_rate 0.0001`) 具有最高优先级，
+#     会覆盖YAML文件中定义的所有同名参数。
+
+# --- 活动配置选择 (修改这里的 \'active_config\' 的值来切换要使用的配置块) ---
+# 脚本会根据这里的设置，从下方对应的配置块中加载训练、模型、损失函数等参数。
+# 请确保下方存在与此名称对应的配置块。
+# 可选项: 'vgg_ce_config', 'vgg_arcface_config', 'resnet_ce_config', 'resnet_arcface_config', 或自定义的配置块名
+active_config: vgg_arcface_config # 选择配置块
 
 # --- 全局设置 (适用于所有模式，通常不需要频繁修改) ---
 # 这些参数会作为基础配置加载，下方选中的配置块会覆盖这里的同名参数。
 # 命令行参数 (--param value) 的优先级最高，会覆盖所有配置。
-use_gpu: true         # 是否使用GPU，命令行参数 --use_gpu / --no-use_gpu 可覆盖
-seed: 42              # 随机种子
-image_size: 64        # 图像预处理统一尺寸，训练和推理时必须一致
-data_dir: 'data'              # 数据集根目录
-class_name: 'face'            # 当前使用的数据集子目录名
-model_save_dir: 'model'       # 模型保存目录
-num_classes: 5        # 数据集中的总身份类别数 (必须根据实际数据集修改!)
-log_interval: 10      # 训练日志打印间隔 (Batch)
-resume: null          # 是否从检查点恢复训练。null: 检查点存在则自动恢复。true: 强制恢复。false: 强制从头开始。命令行参数 --resume / --no-resume 可覆盖。
-# infer.py 和 face_compare.py 的可视化开关，如果希望统一控制可以放这里
-# visualize_results: false
+global_settings:
+  # --- 运行与环境 ---
+  use_gpu: true         # 是否使用GPU。如果为true但无可用GPU，会自动回退到CPU。
+                        # 命令行参数: --use_gpu (设为True), --no-use_gpu (设为False)。
+  seed: 42              # 随机种子，用于初始化所有随机数生成器，以确保实验的可复现性。
+                        # 设置为None或不设置则不固定随机种子。
+  epochs: 10             # 训练的总轮数。如果从检查点继续训练，此值应大于已训练轮数。
 
+  # --- 数据相关 ---
+  image_size: 64        # 图像预处理后的统一尺寸 (H和W)。
+                        # 训练、评估、推理时所有输入图像都会被调整到这个尺寸。
+                        # **重要**: 模型加载时会优先使用模型文件中保存的 image_size。
+                        #         如果模型文件没有保存此信息，则使用此处的配置。
+  data_dir: data      # 数据集的根目录。例如，如果数据在 'project_root/data/face_dataset'，则设为 'data'。
+  class_name: face    # 当前使用的数据集子目录名 (位于 `data_dir` 下)。
+                        # 例如，如果完整数据集路径是 `data/face`，则 `class_name` 为 `face`。
+                        # `CreateDataList.py` 会在此目录下生成 `trainer.list` 等文件。
 
-# --- 活动配置选择 (修改这里的 'active_config' 的值来切换要使用的配置块) ---
-# 脚本会根据这里的设置，从下方对应的配置块中加载训练、模型、损失函数等参数。
-# 请确保下方存在与此名称对应的配置块。
-active_config: 'vgg_ce_config' # 可选项: 'vgg_ce_config', 'resnet_ce_config', 'resnet_arcface_config'
+  # --- 模型与日志 ---
+  model_save_dir: model # 训练好的模型、检查点以及ArcFace特征库的保存目录。
+  num_classes: 6        # 数据集中的总身份类别数量。
+                        # **非常重要**: 必须根据你实际使用的数据集进行修改！
+                        #           可以运行 `CreateDataList.py` 后，查看生成的 `readme.json` 中的 `total_classes`。
+  log_interval: 10      # 训练时，每隔多少个batch打印一次训练日志。
+  resume: null          # 控制是否从检查点恢复训练。
+                        #   null (或不设置): 如果检查点文件存在，则自动尝试恢复训练状态；否则从头开始。 (默认行为)
+                        #   true: 强制尝试从检查点恢复。如果检查点不存在，通常会报错或从头开始（取决于脚本实现）。
+                        #   false: 强制从头开始训练，即使检查点文件存在也会忽略。
+                        # 命令行参数: --resume (设为True), --no-resume (设为False) 具有最高优先级。
 
+  # --- 数据集参数 (由 MyReader.py 使用) ---
+  dataset_params:
+    mean: [0.5, 0.5, 0.5] # 图像归一化时使用的均值 (RGB顺序，范围0-1)。
+                          # 例如，ImageNet常用均值: [0.485, 0.456, 0.406]
+    std: [0.5, 0.5, 0.5]  # 图像归一化时使用的标准差 (RGB顺序，范围0-1)。
+                          # 例如，ImageNet常用标准差: [0.229, 0.224, 0.225]
+    # 训练、验证、测试列表文件的相对路径 (相对于 data_dir/class_name 目录)
+    # 这些文件由 CreateDataList.py 生成。
+    train_list: "trainer.list" # 训练数据列表文件名
+    eval_list: "test.list"     # 评估/验证数据列表文件名 (通常用测试集做验证)
+    # test_list: "test.list"  # 如果有专门的测试集，且与验证集不同，可在此指定
+    # infer_list: "infer_data.list" # 用于批量推理的图像列表文件 (如果 infer.py 支持)
+    
+    num_workers: 0        # DataLoader加载数据时使用的子进程数量。
+                          # 0 表示在主进程中加载数据。
+                          # 在Windows上，大于0可能导致问题，建议设为0。
+                          # 在Linux上，可以根据CPU核心数适当增加 (例如 2 或 4) 以加速数据加载。
+
+# === 具体配置块 ===
+# 每个配置块代表一种特定的模型和训练策略组合。
 
 # --- VGG + CrossEntropy 配置块 ---
-# 如果要使用此配置进行训练，请将上面的 active_config 改为 'vgg_ce_config'
+# 如果要使用此配置进行训练，请将上面的 `active_config` 改为 'vgg_ce_config'
 vgg_ce_config:
-  # --- 模型类型和损失函数 (代码根据此判断) ---
-  model_type: 'vgg'
-  loss_type: 'cross_entropy' # 显式指定损失函数类型
+  # --- 模型类型和损失函数 (关键，代码根据此判断加载逻辑) ---
+  model_type: vgg             # 指定骨干网络为VGG
+  loss_type: cross_entropy  # 指定损失函数/头部为标准交叉熵
 
   # --- 训练超参数 ---
-  # train: # 保持层级结构清晰，或者直接在上一层定义
-  batch_size: 64 # 示例：VGG的batch_size
-  epochs: 80
-  learning_rate: 0.001
-  optimizer_type: 'Momentum'
-  optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: 'CosineAnnealingDecay'
+  # 这些参数会覆盖 `global_settings` 中的同名项 (如果存在)。
+  batch_size: 64          # 每个训练批次中的样本数量。根据显存大小调整。
+  #epochs: 150             # 训练的总轮数。如果从检查点继续训练，此值应大于已训练轮数。
+  learning_rate: 0.001    # 优化器的初始学习率。
+  optimizer_type: Momentum # 优化器类型。可选: 'Momentum', 'AdamW'。
+  optimizer_params:       # 优化器特定的参数。
+    momentum: 0.9           # Momentum优化器的动量因子 (仅当 optimizer_type: 'Momentum')。
+    weight_decay: 0.0005    # L2正则化权重衰减系数。
+
+  # --- 学习率调度器配置 ---
+  # `lr_scheduler_type` 选择调度器类型。
+  # `lr_scheduler_params` 包含该调度器及其可选Warmup的参数。
+  lr_scheduler_type: CosineAnnealingDecay # 可选项: 'StepLR', 'MultiStepDecay', 'CosineAnnealingDecay', 'ReduceLROnPlateau', 'CosineAnnealingWarmRestarts'
   lr_scheduler_params:
-    T_max: 80 # 通常等于 epochs
+    warmup: # Warmup参数块
+      use_warmup: false       # 是否启用学习率预热 (Warmup)。
+      warmup_steps: 500       # Warmup进行的**总步数 (batch数)**, 不是epochs。
+                              # 例如: 如果每个epoch有100个batch，想预热5个epoch，则设置为 5 * 100 = 500。
+      start_lr: 0.00001     # Warmup开始时的学习率。
+      # verbose: True         # (通用参数) 是否在Warmup更新时打印信息。
+    
+    # StepLR: 每隔 `step_size` 个epoch，学习率乘以 `gamma`。
+    step_lr: 
+      step_size: 30
+      gamma: 0.1
+      # verbose: True
 
-  # --- VGG 特定参数 ---
+    # MultiStepDecay: 在指定的 `milestones` (epoch列表) 处，学习率乘以 `gamma`。
+    multi_step_decay:
+      milestones: [50, 100]
+      gamma: 0.1
+      # verbose: True
+      
+    # CosineAnnealingDecay: 余弦退火调度。学习率按余弦曲线从初始值降至 `eta_min`。
+    cosine_annealing_lr:
+      T_max: 150 # **重要**: 通常等于训练的总epochs数。若从检查点继续训练，此值应对应新的总epochs。
+      eta_min: 0.0      # 最小学习率。
+      # verbose: True
+      
+    # ReduceLROnPlateau: 当监控的验证集指标停止改善时，降低学习率。
+    # **注意**: 此调度器的 step() 方法需要在每个epoch的验证阶段后，传入监控的指标值来调用。
+    reduce_lr_on_plateau:
+      metric_name: 'loss'   # 监控的验证集指标名称: 'loss' (对应验证集平均损失) 或 'acc' (对应验证集准确率)。
+      mode: 'min'           # 'min'表示当监控指标停止下降时触发 (如loss); 'max'表示停止上升时触发 (如accuracy)。
+      factor: 0.1           # 学习率衰减因子: new_lr = lr * factor。
+      patience: 10          # 多少个epoch监控的指标没有改善后，才衰减学习率。
+      threshold: 0.0001     # 用于判断指标是否有"显著"改善的阈值。
+      threshold_mode: 'rel' # 'rel' (相对变化) 或 'abs' (绝对变化) 来应用阈值。
+      min_lr: 0.0           # 学习率的下限。
+      # verbose: True
+      
+    # CosineAnnealingWarmRestarts: 带热重启的余弦退火。学习率会周期性地重置并按余弦曲线衰减。
+    cosine_annealing_warm_restarts:
+      T_0: 10             # 第一个重启周期内的迭代次数 (通常是epochs)。
+      T_mult: 2           # 重启后，周期的乘法因子 (T_i = T_0 * T_mult^(i-1))。
+      eta_min: 0.0        # 最小学习率。
+      # verbose: True
+
+  # --- VGG 骨干网络特定参数 ---
+  # `model` 键下存放骨干网络 (`backbone`) 的参数。
   model:
-    vgg_params: # 与ResNet的resnet_params结构对应
+    vgg_params: # 参数块的名称应为 `{model_type}_params`
+      dropout_rate: 0.5   # VGG网络中全连接层之前的Dropout比率。
+      # feature_dim: 512  # (可选) 如果VGGBackbone的输出特征维度可配置，可在此指定。
+                          # 目前VGGBackbone固定输出512维。
+
+  # --- 损失函数特定参数 ---
+  # `loss` 键下存放头部模块/损失函数 (`head`/`loss`) 的参数。
+  loss:
+    cross_entropy_params: {} # 参数块名称应为 `{loss_type}_params`
+
+  # --- 推理、对比、建库时的特定参数 ---
+  # 这些参数主要由 `infer.py`, `compare.py`, `create_face_library.py` 使用。
+  infer: # `infer.py` 使用的参数
+    label_file: "readme.json" # 类别ID到名称的映射文件 (由CreateDataList.py生成)。
+    face_library_path: ''               # 对于CrossEntropy模型，此项通常为空，因为不依赖外部特征库。
+    recognition_threshold: 0.0          # CrossEntropy模型直接分类，此阈值通常不使用。
+    infer_visualize: true               # 推理时是否在图像上标注结果并保存。
+  compare: # `compare.py` 使用的参数
+    compare_threshold: 0.8              # 人脸对比时判断为同一人的相似度阈值。
+                                        # (对于CE模型，对比是基于特征向量余弦相似度，也需要阈值)
+    compare_visualize: true             # 对比时是否并排显示图像和结果并保存。
+  create_library: # `create_face_library.py` 使用的参数
+    output_library_path: 'model/face_library_vgg_ce.pkl' # (可选)即使CE模型不直接用库识别，也可创建特征库用于分析或与其他模型对比。
+
+
+# --- VGG + ArcFace 配置块 ---
+# 如果要使用此配置进行训练，请将上面的 `active_config` 改为 'vgg_arcface_config'
+vgg_arcface_config:
+  model_type: vgg
+  loss_type: arcface
+
+  model:
+    vgg_params:
       dropout_rate: 0.5
+      # feature_dim: 512 # VGGBackbone默认输出512维，ArcFaceHead的in_features应与其匹配。
+                         # 如果VGGBackbone输出维度可调，则通过此参数控制。
 
-  # --- 损失函数参数 (CrossEntropy 通常没有特定参数需要调优) ---
-  # loss:
-  #   cross_entropy_params: {}
+  loss:
+    arcface_params:
+      # ArcFace (paddle.nn.functional.margin_cross_entropy) 的参数:
+      arcface_m1: 1.0   # margin_cross_entropy的margin1参数，标准ArcFace为cos(m1*θ+m2)-m3，通常m1=1.0。
+      arcface_m2: 0.5   # margin_cross_entropy的margin2参数，即ArcFace论文中的角度边距 `m` (弧度)。
+                        # 关键调优参数。范围建议: 0.2 ~ 0.7。
+      arcface_m3: 0.0   # margin_cross_entropy的margin3参数，通常为0。
+      arcface_s: 64.0   # margin_cross_entropy的scale参数，即ArcFace论文中的尺度因子 `s`。
+                        # 关键调优参数。范围建议: 32.0 ~ 128.0。
 
-  # --- 推理/对比/建库 参数 ---
+  batch_size: 32
+  #epochs: 150
+  learning_rate: 0.001
+  optimizer_type: AdamW
+  optimizer_params:
+    weight_decay: 0.0001
+  
+  lr_scheduler_type: CosineAnnealingDecay
+  lr_scheduler_params:
+    warmup:
+      use_warmup: false
+      warmup_steps: 500
+      start_lr: 0.00001
+    cosine_annealing_lr:
+      T_max: 150 # 应等于 epochs
+    # ... (其他调度器参数，如果需要切换，从vgg_ce_config复制并调整)
+
   infer:
-    label_file: 'data/face/readme.json'
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: false
+    face_library_path: 'model/face_library_vgg_arcface.pkl' # ArcFace模型识别时依赖的特征库
+    recognition_threshold: 0.5  # ArcFace识别时的相似度阈值 (0到1之间)
+    label_file: "readme.json"
+    infer_visualize: true
   compare:
-    compare_threshold: 0.8
-    compare_visualize: false
+    compare_threshold: 0.8      # 人脸对比时判断为同一人的相似度阈值
+    compare_visualize: true
   create_library:
-    output_library_path: 'model/face_library_vgg_ce.pkl'
+    output_library_path: 'model/face_library_vgg_arcface.pkl' # 生成的特征库保存路径
 
 
 # --- ResNet + CrossEntropy 配置块 ---
-# 如果要使用此配置进行训练，请将上面的 active_config 改为 'resnet_ce_config'
+# 如果要使用此配置进行训练，请将上面的 `active_config` 改为 'resnet_ce_config'
 resnet_ce_config:
-  # --- 模型类型和损失函数 ---
-  model_type: 'resnet'
-  loss_type: 'cross_entropy'
+  model_type: resnet
+  loss_type: cross_entropy
 
-  # --- ResNet 骨干参数 ---
   model:
     resnet_params:
-      feature_dim: 512
-      nf: 32
-      n_resnet_blocks: 3 # 与 resnet_arcface_config 中的参数名统一
+      feature_dim: 512  # ResNetFace骨干网络输出的特征向量维度。
+      nf: 32            # ResNetFace初始卷积层的输出通道数 (filter数量基数)。
+                        # 影响模型的宽度。
+      n_resnet_blocks: 3 # ResNetFace中每个stage包含的残差块数量。
+                        # 例如，设为3大致对应ResNet-18/ResNet-20的深度级别。
+                        # 可设为列表如 [2,2,2,2] 来更精细控制每阶段块数（需ResNetFace支持）。
 
-  # --- 训练超参数 ---
+  loss:
+    cross_entropy_params: {}
+
   batch_size: 32
-  epochs: 100
-  learning_rate: 0.000001 # 使用您之前修改的值
-  optimizer_type: 'AdamW'
+  #epochs: 150
+  learning_rate: 0.001 # ResNet+CE通常也使用AdamW和较大学习率开始，具体看收敛情况
+  optimizer_type: AdamW
   optimizer_params:
     weight_decay: 0.0001
-  lr_scheduler_type: 'CosineAnnealingDecay'
+  
+  lr_scheduler_type: CosineAnnealingDecay
   lr_scheduler_params:
-    T_max: 100
+    warmup:
+      use_warmup: false
+      warmup_steps: 500
+      start_lr: 0.00001 
+    cosine_annealing_lr:
+      T_max: 150 # 应等于 epochs
+    # ... (其他调度器参数)
 
-  # --- 推理/对比/建库 参数 ---
   infer:
-    label_file: 'data/face/readme.json'
+    label_file: "readme.json"
     face_library_path: ''
     recognition_threshold: 0.0
-    infer_visualize: false
+    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: false
+    compare_visualize: true
   create_library:
     output_library_path: 'model/face_library_resnet_ce.pkl'
 
 
 # --- ResNet + ArcFace 配置块 ---
-# 如果要使用此配置进行训练，请将上面的 active_config 改为 'resnet_arcface_config'
+# 如果要使用此配置进行训练，请将上面的 `active_config` 改为 'resnet_arcface_config'
 resnet_arcface_config: # <-- 当前 active_config 指向这里
-  # --- 模型类型和损失函数 ---
-  model_type: 'resnet'
-  loss_type: 'arcface'
+  model_type: resnet
+  loss_type: arcface
 
-  # --- ResNet 骨干参数 ---
   model:
     resnet_params:
-      feature_dim: 512 # 特征维度
+      feature_dim: 512
       nf: 32
-      n_resnet_blocks: 3 # 与 resnet_ce_config 中的参数名统一
+      n_resnet_blocks: 3
 
-  # --- ArcFace Loss 参数 ---
   loss:
     arcface_params:
       arcface_m1: 1.0
-      arcface_m2: 0.5 # 关键调优参数 m
+      arcface_m2: 0.5
       arcface_m3: 0.0
-      arcface_s: 64.0 # 关键调优参数 s
+      arcface_s: 64.0
 
-  # --- 训练超参数 ---
   batch_size: 32
-  epochs: 100
+  #epochs: 150
   learning_rate: 0.001
-  optimizer_type: 'AdamW'
+  optimizer_type: AdamW
   optimizer_params:
     weight_decay: 0.0001
-  lr_scheduler_type: 'CosineAnnealingDecay'
+    
+  lr_scheduler_type: CosineAnnealingDecay
   lr_scheduler_params:
-    T_max: 100
+    warmup:
+      use_warmup: false # ResNet+ArcFace 通常不需要太复杂的Warmup，但可以尝试
+      warmup_steps: 200 # 示例：较短的Warmup
+      start_lr: 0.00001
+    cosine_annealing_lr:
+      T_max: 150 # 应等于 epochs
+    # ... (其他调度器参数，例如 ReduceLROnPlateau)
+    # reduce_lr_on_plateau:
+    #   metric_name: 'loss'
+    #   mode: 'min'
+    #   factor: 0.2
+    #   patience: 5
+    #   verbose: True
 
-  # --- 推理/对比/建库 参数 ---
   infer:
     face_library_path: 'model/face_library_resnet_arcface.pkl'
     recognition_threshold: 0.5
-    label_file: 'data/face/readme.json'
-    infer_visualize: false
+    label_file: "readme.json"
+    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: false
+    compare_visualize: true
   create_library:
     output_library_path: 'model/face_library_resnet_arcface.pkl'
+
+# --- 更多配置块可以在此添加 ---
+# 例如，针对不同数据集、不同ResNet深度、或其他损失函数的配置。
+# custom_experiment_config:
+#   ...

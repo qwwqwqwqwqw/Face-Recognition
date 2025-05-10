@@ -70,3 +70,5 @@ MANIFEST
 #  before PyInstaller builds banned, so submitting them is not necessary.
 *.manifest
 *.spec
+
+指南/
