@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+pip-wheel-metadata/
+*.so
+
+# Virtual Environment
+paddle_env/
+venv/
+*.venv
+.env
+env/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Data files - generated lists and metadata
+# Consider adding specific image file patterns like data/face/*/*.jpg if your dataset is very large
+# and you don't want to version the raw images.
+data/
+
+# Model files
+model/*
+model/backup/*
+!model/.gitkeep
+
+# Output files
+results/
+!results/.gitkeep
+
+# Log files
+*.log
+logs/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Distribution / packaging
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds banned, so submitting them is not necessary.
+*.manifest
+*.spec
