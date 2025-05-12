@@ -21,7 +21,7 @@
 # 脚本会根据这里的设置，从下方对应的配置块中加载训练、模型、损失函数等参数。
 # 请确保下方存在与此名称对应的配置块。
 # 可选项: 'vgg_ce_config', 'vgg_arcface_config', 'resnet_ce_config', 'resnet_arcface_config', 或自定义的配置块名
-active_config: vgg_arcface_config # 选择配置块
+active_config: vgg_ace_config # 选择配置块
 
 # --- 全局设置 (适用于所有模式，通常不需要频繁修改) ---
 # 这些参数会作为基础配置加载，下方选中的配置块会覆盖这里的同名参数。
