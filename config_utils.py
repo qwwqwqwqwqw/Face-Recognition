@@ -201,22 +201,31 @@ def load_config(default_yaml_path: str, cmd_args_namespace: argparse.Namespace) 
     # 初始化合并后的配置字典，从全局设置开始
     merged_config_dict = global_settings.copy()
 
-    # 步骤 2: 获取并合并活动配置块 (active_config)
-    # active_config 是YAML中的一个键，其值指定了当前应激活哪个配置块（例如 'resnet_arcface_config'）。
-    active_config_name = full_yaml_config.get('active_config')
-    if active_config_name:
-        active_config_block = full_yaml_config.get(active_config_name)
+    # 步骤 2: 确定并获取活动配置块 (active_config)
+    # 优先使用命令行传入的 active_config，如果存在且有效的话。
+    cmd_active_config = getattr(cmd_args_namespace, 'active_config', None)
+    yaml_active_config_name = full_yaml_config.get('active_config')
+
+    active_config_name_to_use = None
+    if cmd_active_config: # 如果命令行提供了 active_config
+        print(f"从命令行接收到 active_config: '{cmd_active_config}'，将覆盖YAML中的设置。")
+        active_config_name_to_use = cmd_active_config
+    elif yaml_active_config_name: # 否则，使用YAML文件中的 active_config
+        active_config_name_to_use = yaml_active_config_name
+        print(f"将使用YAML文件中指定的 active_config: '{yaml_active_config_name}'")
+    else: # 两者都没有提供
+        print("提示: YAML文件和命令行均未定义 'active_config'。将仅使用全局设置（如果存在）和命令行参数。")
+
+    if active_config_name_to_use:
+        active_config_block = full_yaml_config.get(active_config_name_to_use)
         if active_config_block and isinstance(active_config_block, dict):
-            print(f"加载并合并活动配置块: {active_config_name}")
-            # 使用深层更新将活动配置块合并到已有的配置中
+            print(f"加载并合并活动配置块: {active_config_name_to_use}")
             merged_config_dict = deep_update(merged_config_dict, active_config_block)
         elif active_config_block: # 不是字典
-             print(f"警告: 活动配置块 '{active_config_name}' 的值不是一个有效的配置字典，已忽略。")
+             print(f"警告: 活动配置块 '{active_config_name_to_use}' 的值不是一个有效的配置字典，已忽略。")
         else: # 找不到对应的配置块
-            print(f"警告: 在YAML中找到了 active_config 名称 '{active_config_name}'，但找不到对应的配置块。")
-    else: # YAML中未定义active_config
-        print("提示: YAML 文件中未定义 'active_config'。将仅使用全局设置（如果存在）和命令行参数。")
-
+            print(f"警告: 在YAML中找不到名为 '{active_config_name_to_use}' 的配置块。")
+    
     # 步骤 3: 合并命令行参数 (命令行参数具有最高优先级)
     # 将argparse解析的命名空间转换为字典
     cmd_args_dict = vars(cmd_args_namespace)

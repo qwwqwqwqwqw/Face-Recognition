@@ -465,6 +465,8 @@ if __name__ == '__main__':
     parser.add_argument('--resume', action=argparse.BooleanOptionalAction, default=None,
                         help='是否从检查点恢复训练。此命令行开关会覆盖配置文件中的设置。'
                              '例如: --resume (设为True), --no-resume (设为False)。如果未指定，则遵循配置文件。')
+    parser.add_argument('--active_config', type=str, default=None,
+                        help='通过命令行指定要激活的配置块名称，覆盖YAML文件中的active_config设置。')
 
     # --- 其他可覆盖配置文件的参数 ---
     # 以下参数如果用户在命令行中指定了，其值将覆盖从YAML配置文件中加载的同名参数。
