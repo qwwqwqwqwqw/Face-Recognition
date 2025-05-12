@@ -28,7 +28,7 @@ active_config: vgg_arcface_config # 选择配置块
 # 命令行参数 (--param value) 的优先级最高，会覆盖所有配置。
 global_settings:
   # --- 运行与环境 ---
-  use_gpu: true         # 是否使用GPU。如果为true但无可用GPU，会自动回退到CPU。
+  use_gpu: false         # 是否使用GPU。如果为true但无可用GPU，会自动回退到CPU。
                         # 命令行参数: --use_gpu (设为True), --no-use_gpu (设为False)。
   seed: 42              # 随机种子，用于初始化所有随机数生成器，以确保实验的可复现性。
                         # 设置为None或不设置则不固定随机种子。
