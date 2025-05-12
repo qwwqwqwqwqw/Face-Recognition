@@ -93,6 +93,7 @@
     *   支持通过**命令行参数**指定核心输入并覆盖YAML配置，方便快速实验和调整。
 *   **数据增强**: 训练时支持随机翻转、亮度对比度调整等数据增强策略，提高模型泛化能力。
 *   **清晰的项目结构**: 模块化设计，易于理解、维护和扩展。
+*   **云服务器自动训练**: 提供自动化训练脚本，支持在云服务器上持续训练和参数调整。
 
 ## 📑 目录
 
@@ -1084,3 +1085,157 @@ RESNET 骨干网络加载并设置到评估模式成功。
     *   `infer.py`：已修改为支持从模型文件加载配置，并可使用特征库进行 ArcFace 模型识别。
     *   `compare.py`：已修改为支持从模型文件加载配置，并使用骨干网络进行特征提取对比。
 6.  ⏳ **进行中**: **进行联合调优和实验对比**：系统调整学习率、批大小、ArcFace Loss 的超参数等。对比 ResNet + ArcFace Loss 与 VGG + CrossEntropyLoss 的性能。记录并分析实验结果。 
+
+## 云服务器自动化训练
+
+为了解决本地没有GPU的不足，项目提供了在云服务器上进行自动化训练的功能。通过Git拉取最新代码并结合YAML配置文件，实现多种模型组合的自动训练。
+
+### 重要注意事项
+
+**关于ArcFace在CPU环境的兼容性问题：**
+
+* PaddlePaddle的`margin_cross_entropy`函数（ArcFace损失函数的核心）在CPU上**不受支持**。
+* 因此，在CPU环境（如某些云服务器）中，无法使用`arcface`损失类型的模型进行训练。
+* 我们已从自动训练脚本中移除了使用ArcFace的模型组合（`vgg_arcface_config`和`resnet_arcface_config`）。
+* 现阶段在CPU环境只能训练CrossEntropy模型组合（`vgg_ce_config`和`resnet_ce_config`）。
+
+### 自动训练脚本
+
+项目提供了`run_train.sh`脚本用于在云服务器上进行自动化训练。脚本功能包括：
+
+1. 进入项目目录并激活虚拟环境
+2. 从GitHub拉取最新代码
+3. 按照预设的配置块列表，依次执行训练
+4. 支持从上次检查点继续训练
+5. 可配置的训练参数和模型组合
+
+### 使用方法
+
+1. 将`run_train.sh`脚本上传到您的云服务器
+2. 修改脚本中的`PROJECT_DIR`变量，指向您的项目目录
+3. 确保虚拟环境路径`VENV_PATH`正确
+4. 给脚本添加执行权限并运行：
+
+```bash
+chmod +x run_train.sh
+./run_train.sh
+```
+
+或作为后台任务运行：
+
+```bash
+nohup ./run_train.sh > training.log 2>&1 &
+```
+
+### 脚本配置说明
+
+脚本中的主要配置项：
+
+* `PROJECT_DIR`: 项目根目录的完整路径
+* `VENV_PATH`: Python虚拟环境激活脚本的相对路径
+* `CONFIG_FILE`: 主配置文件位置
+* `CONFIG_NAMES_TO_TRAIN`: 需要依次训练的配置块名称列表（数组）
+
+示例：
+```bash
+PROJECT_DIR="/root/Face-Recognition"
+VENV_PATH="paddle_env/bin/activate"
+CONFIG_FILE="configs/default_config.yaml"
+
+# 需要训练的配置块名称列表 (与YAML文件中的键名对应)
+# 由于margin_cross_entropy (ArcFace核心) 在PaddlePaddle CPU上不支持，
+# 我们暂时只训练 CrossEntropy (ce) 模型。
+CONFIG_NAMES_TO_TRAIN=(
+    "vgg_ce_config"
+    "resnet_ce_config"
+)
+```
+
+## 损失函数详细介绍
+
+本项目实现了两种主要的损失函数，它们在人脸识别领域各有优势：
+
+### 1. 交叉熵损失 (CrossEntropy Loss)
+
+交叉熵损失是深度学习中最常用的分类损失函数之一。在本项目中，通过`CrossEntropyHead`类实现。
+
+**原理：**
+* 将人脸识别问题视为标准的分类问题
+* 通过全连接层将特征向量映射到类别空间
+* 使用Softmax函数将输出转换为各个类别的概率分布
+* 计算预测概率分布与真实标签之间的交叉熵
+
+**优势：**
+* 实现简单，训练稳定
+* 在闭集场景（测试集身份完全包含在训练集中）表现良好
+* CPU和GPU环境均支持
+* 计算效率高
+
+**局限性：**
+* 类间区分度有限，特征不够紧凑
+* 开放集（未知身份）识别能力较弱
+* 需要重新训练才能识别新身份
+
+### 2. ArcFace损失 (Angular Margin Loss)
+
+ArcFace是一种先进的度量学习损失函数，通过在角度空间增加类间边界来学习高判别力的特征。在本项目中通过`ArcFaceHead`类实现。
+
+**原理：**
+* 特征和权重向量归一化，将问题转化到超球面上
+* 引入角度间隔（margin）增大类间距离
+* 数学表示为：$cos(θ_{yi} + m)$，其中$θ_{yi}$是特征向量与其对应类别中心之间的角度，$m$是额外的边际间隔
+* 比传统Softmax在几何上施加了更严格的约束
+
+**超参数（配置中的关键参数）：**
+* `arcface_m2`: 角度边界大小（通常为0.5左右）
+* `arcface_s`: 缩放因子（通常为64.0左右）
+
+**优势：**
+* 学习到高度判别性的特征表示
+* 类内更紧凑，类间更分离
+* 开放集（未知身份）识别表现优秀
+* 支持特征库方式动态添加新身份
+
+**局限性：**
+* **在PaddlePaddle中依赖`margin_cross_entropy`函数，该函数在CPU环境下不支持**
+* 训练可能不如CrossEntropy稳定，对超参数更敏感
+* 计算开销略大
+
+### 应用选择指南
+
+* 如果您使用CPU环境（当前云服务器）：
+  * 只能使用CrossEntropy损失模型
+  * 选择`vgg_ce_config`或`resnet_ce_config`配置块
+
+* 如果您有GPU环境可用：
+  * 对于追求最高识别精度：使用`resnet_arcface_config`
+  * 对于训练稳定性：使用`vgg_ce_config`或`resnet_ce_config`
+
+## 下一步计划
+
+### 使用Optuna进行超参数调优
+
+我们计划在下一阶段引入[Optuna](https://optuna.org/)框架来自动化超参数搜索和优化过程。Optuna是一个专为深度学习设计的超参数优化框架，具有以下优势：
+
+1. **高效的搜索算法**：使用贝叶斯优化、树形结构化Parzen估计器等先进算法
+2. **并行化支持**：可在多个计算节点上并行执行实验
+3. **早期停止策略**：自动终止表现不佳的实验，节省计算资源
+4. **可视化工具**：直观呈现参数重要性和优化过程
+
+**计划调优的超参数包括：**
+
+* 学习率（`learning_rate`）
+* 批量大小（`batch_size`）
+* 优化器类型和权重衰减（`optimizer_type`和`weight_decay`）
+* ResNet模型参数（`nf`和`n_resnet_blocks`）
+* CrossEntropy模型的网络结构
+
+**实施计划：**
+
+1. 开发Optuna集成脚本，封装训练和评估流程
+2. 定义超参数搜索空间和目标指标（如验证集准确率）
+3. 在CPU环境中针对CrossEntropy模型组合进行调参
+4. 记录并分析最佳参数组合
+5. 将优化结果反馈到默认配置中
+
+完成超参数优化后，我们将进一步提升模型性能和训练效率，以弥补当前不能使用ArcFace的局限。
