@@ -167,12 +167,12 @@
 graph TD;
     subgraph "数据处理模块"
         A[原始图像数据] --> B(CreateDataList.py);
-        B -- "生成" --> C[数据列表<br>(trainer.list, test.list, readme.json)];
+        B -- "生成" --> C[数据列表\n(trainer.list, test.list, readme.json)];
         C --> D(MyReader.py);
     end
 
     subgraph "配置管理模块"
-        E[YAML配置<br>(configs/default_config.yaml)] --> F(config_utils.py);
+        E[YAML配置\n(configs/default_config.yaml)] --> F(config_utils.py);
         G[命令行参数] --> F;
     end
 
@@ -187,16 +187,16 @@ graph TD;
         L -- "加载配置" --> F;
         L -- "构建模型经由" --> I;
         L -- "使用学习率调度器" --> M(utils/lr_scheduler_factory.py);
-        L -- "保存训练结果" --> N[训练模型/检查点<br>(model/)];
+        L -- "保存训练结果" --> N[训练模型/检查点\n(model/)];
 
         O(create_face_library.py) -- "加载模型" --> N;
         O -- "读取数据列表" --> C;
         O -- "加载配置" --> F;
         O -- "构建骨干网络经由" --> I;
-        O -- "生成并保存" --> P[人脸特征库<br>(.pkl)];
+        O -- "生成并保存" --> P[人脸特征库\n(.pkl)];
 
         Q(infer.py) -- "加载模型" --> N;
-        Q -- "使用特征库<br>(限ArcFace模型)" --> P;
+        Q -- "使用特征库\n(限ArcFace模型)" --> P;
         Q -- "加载配置" --> F;
         Q -- "构建模型经由" --> I;
 
@@ -217,8 +217,8 @@ graph TD;
         G -- "影响执行" --> Q;
         G -- "影响执行" --> R;
 
-        Q -- "输出识别结果到" --> S[识别结果<br>(results/)];
-        R -- "输出对比结果到" --> T[对比结果<br>(results/)];
+        Q -- "输出识别结果到" --> S[识别结果\n(results/)];
+        R -- "输出对比结果到" --> T[对比结果\n(results/)];
 
         WebApp([交互式Web UI (规划中)])
         WebApp -.-> L;
@@ -229,7 +229,7 @@ graph TD;
     end
 ```
 
-*(这是一个简化的概念图，展示了主要模块和数据流。)*
+*(本图展示了本项目中各核心模块之间的依赖关系与数据流动，涵盖了数据预处理、模型训练、特征提取与识别推理等主要过程。)*
 
 ### 核心技术栈
 
