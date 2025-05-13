@@ -15,9 +15,9 @@ class ImageAugmentation:
     在评估/测试时仅进行必要的尺寸调整和归一化。
     """
 
-    def __init__(self, image_size: int | tuple[int, int] = 64, 
-                 mean_value: list[float] = [0.5, 0.5, 0.5], 
-                 std_value: list[float] = [0.5, 0.5, 0.5], 
+    def __init__(self, image_size: int | tuple[int, int] = 64,
+                 mean_value: list[float] = [0.5, 0.5, 0.5],
+                 std_value: list[float] = [0.5, 0.5, 0.5],
                  is_train: bool = True):
         """
         ImageAugmentation 初始化函数。
@@ -40,7 +40,7 @@ class ImageAugmentation:
         else:
             self.image_height = image_size[0]
             self.image_width = image_size[1]
-        
+
         self.mean = np.array(mean_value).reshape(3, 1, 1).astype('float32')
         self.std = np.array(std_value).reshape(3, 1, 1).astype('float32')
         self.is_train = is_train
@@ -82,7 +82,7 @@ class ImageAugmentation:
                 # 随机水平翻转
                 if random.random() > 0.5:
                     img = cv2.flip(img, 1) # 1表示水平翻转，0表示垂直，-1表示水平垂直都翻转
-                
+
                 # 示例：随机亮度调整 (可以根据需要扩展)
                 # if random.random() > 0.5:
                 #     brightness_factor = random.uniform(0.7, 1.3)
@@ -127,9 +127,9 @@ class ImageAugmentation:
             #         如果它们是针对 [0,255] 范围计算的，则不应除以255.0。
             #         假设这里的mean/std是针对[0,1]范围。
             img_normalized = (img_chw / 255.0 - self.mean) / self.std
-            
+
             return img_normalized
-        
+
         except FileNotFoundError: # 再次捕获以确保信息传递
             raise
         except Exception as e:
@@ -146,7 +146,7 @@ class CustomDataset(paddle.io.Dataset):
     该数据集负责从一个包含图像路径和对应标签的列表文件中读取数据，
     并使用传入的 `ImageAugmentation` 对象对每个图像进行加载和预处理。
     """
-    def __init__(self, data_list_file: str, image_augmentor: ImageAugmentation, 
+    def __init__(self, data_list_file: str, image_augmentor: ImageAugmentation,
                  image_files_base_dir: str, mode: str = 'train'):
         """
         CustomDataset 初始化函数。
@@ -195,7 +195,7 @@ class CustomDataset(paddle.io.Dataset):
                         print(f"警告: 在文件 '{data_list_file}' 中发现格式不正确的行: '{line}' (分割后部分数: {len(parts)})，已跳过。")
         except Exception as e:
             raise RuntimeError(f"读取数据列表文件 '{data_list_file}' 失败: {e}")
-        
+
         if not self.samples:
             print(f"警告: 从 '{data_list_file}' 加载的样本为空。请检查文件内容和格式。")
         else:
@@ -211,24 +211,24 @@ class CustomDataset(paddle.io.Dataset):
         Returns:
             tuple:
                 - processed_image (np.ndarray): 经过 `ImageAugmentation` 处理后的图像数据 (CHW, float32)。
-                - label (np.ndarray or str): 
+                - label (np.ndarray or str):
                     如果标签是整数类别ID，则返回一个包含该ID的 `np.ndarray` (int64类型，形状为[1])。
                     如果原始样本中是图像路径（例如用于某些类型的推理或对比），则可能返回图像路径字符串。
                     当前实现中，标签总是被转换为整数，所以这里总是返回 `np.ndarray`。
                     对于推理模式且标签为-1的情况，仍返回 `np.array([-1], dtype='int64')`。
         """
         img_relative_path, label_id = self.samples[idx]
-        
+
         # 构建图像的完整路径
         full_img_path = os.path.join(self.image_files_base_dir, img_relative_path)
-        
+
         try:
             # 调用图像增强器处理图像 (使用完整路径)
             processed_image = self.image_augmentor.process_image(full_img_path)
-            
+
             # 将标签转换为PaddlePaddle期望的格式 (通常是int64类型的Tensor)
-            label_tensor_like = np.array([label_id], dtype='int64') 
-            
+            label_tensor_like = np.array([label_id], dtype='int64')
+
             return processed_image, label_tensor_like
         except Exception as e:
             print(f"错误: 获取索引 {idx} (图像路径: '{full_img_path}') 的数据时失败: {e}")
@@ -264,7 +264,7 @@ def create_data_loader(config, mode: str, custom_dataset_class=CustomDataset) ->
             - `dataset_params.num_workers` (int, optional): 用于数据加载的子进程数量。默认为0 (在主进程中加载)。
         mode (str): 指定数据加载的模式。可选值：'train', 'eval', 'test', 'infer'。
                     根据模式选择不同的数据列表文件和增强策略 (is_train)。
-        custom_dataset_class (type[paddle.io.Dataset], optional): 
+        custom_dataset_class (type[paddle.io.Dataset], optional):
             允许传入自定义的数据集类 (必须继承自 `paddle.io.Dataset`)。
             默认为本文件中定义的 `CustomDataset`。
 
@@ -274,9 +274,10 @@ def create_data_loader(config, mode: str, custom_dataset_class=CustomDataset) ->
     Raises:
         ValueError: 如果 `mode` 无效，或者所需的配置参数缺失。
         FileNotFoundError: 如果对应模式的数据列表文件未在配置中指定或文件不存在。
+        ValueError: 如果 config.class_name 为 None。
     """
     is_train = (mode == 'train')
-    
+
     # 从配置中获取参数
     image_size = config.get('image_size', 64)
     dataset_params = config.get('dataset_params', {})
@@ -284,7 +285,7 @@ def create_data_loader(config, mode: str, custom_dataset_class=CustomDataset) ->
     std_val = dataset_params.get('std', [0.5, 0.5, 0.5])
     num_workers = dataset_params.get('num_workers', 0)
     batch_size = config.get('batch_size', 32)
-    
+
     # 根据模式选择数据列表文件
     # 首先获取列表文件名 (例如 "trainer.list")
     list_filename_only = None
@@ -310,7 +311,15 @@ def create_data_loader(config, mode: str, custom_dataset_class=CustomDataset) ->
 
     # 构建数据列表文件的完整路径
     # 列表文件位于 config.data_dir / config.class_name / list_filename_only
-    dataset_list_file_dir = os.path.join(config.data_dir, config.class_name)
+
+    # === 添加检查以确保 config.class_name 不是 None ===
+    class_name_from_config = config.get('class_name')
+    if class_name_from_config is None:
+        raise ValueError("Configuration error: 'class_name' is not specified in config. Please provide it via YAML or command line.")
+
+    dataset_list_file_dir = os.path.join(config.data_dir, class_name_from_config) # Use the checked class_name
+    # ===================================================
+
     actual_data_list_file_path = os.path.join(dataset_list_file_dir, list_filename_only)
 
     if not os.path.exists(actual_data_list_file_path):
@@ -340,16 +349,16 @@ def create_data_loader(config, mode: str, custom_dataset_class=CustomDataset) ->
     #            训练时通常设为True，以保证每个batch的形状一致，避免BN层等出现问题。
     #            评估/测试时通常设为False，以确保所有样本都被评估。
     drop_last_setting = True if mode == 'train' else False
-    
+
     data_loader = paddle.io.DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        drop_last=drop_last_setting, 
+        drop_last=drop_last_setting,
         use_shared_memory=False # 根据系统和数据量调整，Windows下多进程可能与共享内存存在问题
     )
-    
+
     print(f"为模式 '{mode}' 创建 DataLoader 成功。Batch size: {batch_size}, Shuffle: {shuffle}, Num workers: {num_workers}, Drop last: {drop_last_setting}")
     return data_loader
 
@@ -363,14 +372,16 @@ if __name__ == '__main__':
         def __init__(self):
             self.image_size = 64
             self.batch_size = 2 # 测试时用小批量
+            self.data_dir = 'temp_test_data' # 添加 data_dir
+            self.class_name = 'face' # 添加 class_name
             self.dataset_params = {
                 'mean': [0.5, 0.5, 0.5],
                 'std': [0.5, 0.5, 0.5],
                 'num_workers': 0,
                 # 需要确保这些文件存在且内容符合格式
-                'train_list': 'temp_train_list.txt', 
-                'eval_list': 'temp_eval_list.txt',
-                'infer_list': 'temp_infer_list.txt'
+                'train_list': 'trainer.list',
+                'eval_list': 'test.list',
+                'infer_list': 'infer.list' # Changed filename
             }
         def get(self, key, default=None):
             return getattr(self, key, default)
@@ -378,10 +389,12 @@ if __name__ == '__main__':
     mock_config = MockConfig()
 
     # 准备假的列表文件和图像数据
-    base_data_dir = 'temp_test_data'
-    if not os.path.exists(base_data_dir):
-        os.makedirs(base_data_dir)
-    
+    base_data_dir = mock_config.data_dir # Use config data_dir
+    class_data_dir = os.path.join(base_data_dir, mock_config.class_name) # Use config class_name
+
+    if not os.path.exists(class_data_dir):
+        os.makedirs(class_data_dir)
+
     sample_images_info = {
         'class_a': ['img1.png', 'img2.jpg'],
         'class_b': ['img3.png']
@@ -392,33 +405,43 @@ if __name__ == '__main__':
         img = np.zeros((size[0], size[1], 3), dtype=np.uint8)
         cv2.imwrite(path, img)
 
+    # Create dummy class subdirectories and images
     for class_name, img_names in sample_images_info.items():
-        class_dir = os.path.join(base_data_dir, class_name)
-        if not os.path.exists(class_dir):
-            os.makedirs(class_dir)
+        # Dummy class dirs relative to the main data directory
+        dummy_class_dir = os.path.join(class_data_dir, class_name)
+        if not os.path.exists(dummy_class_dir):
+            os.makedirs(dummy_class_dir)
         for img_name in img_names:
-            create_dummy_image(os.path.join(class_dir, img_name))
+            create_dummy_image(os.path.join(dummy_class_dir, img_name))
 
-    # 创建假的列表文件
-    with open(mock_config.dataset_params['train_list'], 'w') as f:
-        f.write(f"{os.path.join(base_data_dir, 'class_a', 'img1.png')}\t0\n")
-        f.write(f"{os.path.join(base_data_dir, 'class_a', 'img2.jpg')}\t0\n")
-        f.write(f"{os.path.join(base_data_dir, 'class_b', 'img3.png')}\t1\n")
-    
-    with open(mock_config.dataset_params['eval_list'], 'w') as f:
-        f.write(f"{os.path.join(base_data_dir, 'class_a', 'img1.png')}\t0\n")
+    # Create dummy list files inside the class directory
+    train_list_path_dummy = os.path.join(class_data_dir, mock_config.dataset_params['train_list'])
+    eval_list_path_dummy = os.path.join(class_data_dir, mock_config.dataset_params['eval_list'])
+    infer_list_path_dummy = os.path.join(class_data_dir, mock_config.dataset_params['infer_list'])
 
-    with open(mock_config.dataset_params['infer_list'], 'w') as f:
-        f.write(f"{os.path.join(base_data_dir, 'class_b', 'img3.png')}\n") # 推理列表可能只有路径
+
+    with open(train_list_path_dummy, 'w') as f:
+        # Paths in list files should be relative to image_files_base_dir (which is class_data_dir)
+        f.write(f"{os.path.join('class_a', 'img1.png')}\t0\n")
+        f.write(f"{os.path.join('class_a', 'img2.jpg')}\t0\n")
+        f.write(f"{os.path.join('class_b', 'img3.png')}\t1\n")
+
+    with open(eval_list_path_dummy, 'w') as f:
+        f.write(f"{os.path.join('class_a', 'img1.png')}\t0\n")
+
+    with open(infer_list_path_dummy, 'w') as f:
+        f.write(f"{os.path.join('class_b', 'img3.png')}\n") # 推理列表可能只有路径
 
     print("\n--- 测试 ImageAugmentation ---")
     augmentor_train = ImageAugmentation(image_size=mock_config.image_size, is_train=True)
     augmentor_eval = ImageAugmentation(image_size=mock_config.image_size, is_train=False)
-    
-    sample_img_path = os.path.join(base_data_dir, 'class_a', 'img1.png')
+
+    sample_img_relative_path = os.path.join('class_a', 'img1.png')
+    sample_img_full_path = os.path.join(class_data_dir, sample_img_relative_path)
+
     try:
-        processed_train_img = augmentor_train.process_image(sample_img_path)
-        processed_eval_img = augmentor_eval.process_image(sample_img_path)
+        processed_train_img = augmentor_train.process_image(sample_img_full_path)
+        processed_eval_img = augmentor_eval.process_image(sample_img_full_path)
         print(f"ImageAugmentation (train) 输出形状: {processed_train_img.shape}, 类型: {processed_train_img.dtype}")
         print(f"ImageAugmentation (eval) 输出形状: {processed_eval_img.shape}, 类型: {processed_eval_img.dtype}")
         assert processed_train_img.shape == (3, mock_config.image_size, mock_config.image_size)
@@ -433,13 +456,11 @@ if __name__ == '__main__':
         for i, (images, labels) in enumerate(train_loader):
             print(f"Train Batch {i+1}: Images shape {images.shape}, Labels shape {labels.shape}, Labels dtype {labels.dtype}")
             print(f"  Sample labels: {labels.numpy().flatten()[:5]}") # 打印部分标签
-            assert images.shape == (mock_config.batch_size if i < len(train_loader)-1 or len(train_loader.dataset) % mock_config.batch_size == 0 else len(train_loader.dataset) % mock_config.batch_size, 
-                                     3, mock_config.image_size, mock_config.image_size) if not train_loader.drop_last or len(train_loader.dataset) >= mock_config.batch_size else True 
+            assert images.shape == (mock_config.batch_size if i < len(train_loader)-1 or len(train_loader.dataset) % mock_config.batch_size == 0 else len(train_loader.dataset) % mock_config.batch_size,
+                                     3, mock_config.image_size, mock_config.image_size) if not train_loader.drop_last or len(train_loader.dataset) >= mock_config.batch_size else True
             # 更简单的校验，如果drop_last=True且样本数不足一个batch，则loader为空
-            if train_loader.drop_last and len(train_loader.dataset) < mock_config.batch_size:
-                 assert False, "Drop_last is True but dataset is smaller than batch_size, loader should be empty or not enter loop."
-            elif not train_loader.drop_last and len(train_loader.dataset) > 0 : # 确保至少有一个batch被迭代
-                pass 
+            if train_loader.drop_last and len(train_loader.dataset) > 0 and len(train_loader) == 0:
+                 assert False, "Drop_last is True but dataset has samples, loader should not be empty." # Should not happen with current test data
             elif len(train_loader.dataset) == 0: # 如果数据集为空
                 pass
             else: # 正常情况
@@ -448,8 +469,8 @@ if __name__ == '__main__':
             assert labels.dtype == paddle.int64
             if i >= 1: # 测试少量批次即可
                 break
-        if len(train_loader.dataset) > 0 and i == 0 and len(train_loader) == 0 : # 处理drop_last=True且样本不足一个batch的情况
-            print("训练数据加载器: drop_last=True, 样本数小于batch_size，加载器为空或迭代未执行，符合预期。")
+        if len(train_loader.dataset) > 0 and len(train_loader) == 0 and train_loader.drop_last: # 处理drop_last=True且样本不足一个batch的情况
+             print("训练数据加载器: drop_last=True, 样本数小于batch_size，加载器为空或迭代未执行，符合预期。")
         elif len(train_loader.dataset) == 0:
             print("训练数据加载器: 数据集为空，迭代未执行，符合预期。")
         else:
@@ -464,7 +485,7 @@ if __name__ == '__main__':
             print(f"Eval Batch {i+1}: Images shape {images.shape}, Labels shape {labels.shape}")
             # 对于eval，drop_last=False，所以最后一个batch可能不等于batch_size
             assert images.shape[1:] == (3, mock_config.image_size, mock_config.image_size)
-            assert images.shape[0] <= mock_config.batch_size 
+            assert images.shape[0] <= mock_config.batch_size
             if i >= 1: break
         print("Eval DataLoader 初步迭代测试通过。")
     except Exception as e:
@@ -484,21 +505,32 @@ if __name__ == '__main__':
 
     # 清理临时文件和目录
     print("\n清理临时测试文件...")
-    os.remove(mock_config.dataset_params['train_list'])
-    os.remove(mock_config.dataset_params['eval_list'])
-    os.remove(mock_config.dataset_params['infer_list'])
+    try:
+        os.remove(train_list_path_dummy)
+        os.remove(eval_list_path_dummy)
+        os.remove(infer_list_path_dummy)
+    except OSError as e:
+        print(f"清理列表文件失败: {e}")
+
+
     for class_name, img_names in sample_images_info.items():
+        dummy_class_dir = os.path.join(class_data_dir, class_name)
         for img_name in img_names:
             try:
-                os.remove(os.path.join(base_data_dir, class_name, img_name))
+                os.remove(os.path.join(dummy_class_dir, img_name))
             except OSError:
                 pass # 可能文件已被其他方式删除
         try:
-            os.rmdir(os.path.join(base_data_dir, class_name))
+            os.rmdir(dummy_class_dir)
         except OSError:
-            pass
+            pass # 目录可能不为空或已被删除
+
     try:
-        os.rmdir(base_data_dir)
-    except OSError:
-        pass
-    print("MyReader.py 测试完成。") 
+        # Attempt to remove the class_data_dir and base_data_dir if they are empty
+        if not os.listdir(class_data_dir):
+            os.rmdir(class_data_dir)
+        if not os.listdir(base_data_dir):
+            os.rmdir(base_data_dir)
+    except OSError as e:
+        print(f"清理临时数据目录失败: {e}. 可能目录非空或正在被使用。")
+    print("MyReader.py 测试完成。")

@@ -138,8 +138,8 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
     train_source = cmd_args.source if hasattr(cmd_args, 'source') else 'manual' # 默认为 manual
     print(f"训练来源: {train_source}")
 
-    # 构建包含模型类型、损失类型、硬件和来源的文件名基础部分
-    filename_base = f"{config.model_type}_{config.loss_type}_{'gpu' if paddle.is_compiled_with_cuda() else 'cpu'}_{train_source}"
+    # 构建包含模型类型、损失类型、学习策略类型、硬件和来源的文件名基础部分
+    filename_base = f"{config.model_type}_{config.loss_type}_{config.lr_scheduler_type}_{'gpu' if paddle.is_compiled_with_cuda() else 'cpu'}_{train_source}"
 
     checkpoint_filename = f"checkpoint_{filename_base}.pdparams"
     checkpoint_path = os.path.join(config.model_save_dir, checkpoint_filename)

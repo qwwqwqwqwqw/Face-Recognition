@@ -24,11 +24,16 @@
 #       理想情况下，这些通用工具函数可以移至一个共享的 utils.py 模块中以避免代码重复。
 #       但为了脚本的独立性，暂时在此处保留了本地副本。
 
+from distutils import config
+import json
 import os
 import cv2
 import argparse
 import numpy as np
 import matplotlib
+
+import heads
+import model_factory
 matplotlib.use('Agg')  # 使用非交互式后端，防止在无显示环境的服务器上出错
 import matplotlib.pyplot as plt
 import paddle
@@ -362,7 +367,7 @@ if __name__ == '__main__':
     # ... (打印关键配置) ...
     print(f"  类别数 (num_classes): {final_config.num_classes}")
     print(f"  目标图片: {cmd_line_args.target_image_path}") # 使用命令行传入的路径
-    print(f"  人脸库路径: {cmd_args.library_path or final_config.get('face_library_path', 'face_library.npy')}")
+    print(f"  人脸库路径: {cmd_line_args.library_path or final_config.get('face_library_path', 'face_library.npy')}")
     print(f"  加载的模型路径: {final_config.get('trained_model_path') or '自动构建'}")
     print(f"  相似度阈值: {final_config.similarity_threshold}")
     print("---------------------------------------------------")

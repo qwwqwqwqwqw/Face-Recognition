@@ -13,7 +13,7 @@
 #
 # --- 参数覆盖规则 ---
 # 1.  `global_settings` 作为基础。
-# 2.  `active_config` 指定的配置块中的参数覆盖 `global_settings`。
+# 2.  `active_config` 指定的配置块指定的配置块中的参数覆盖 `global_settings`。
 # 3.  通过命令行传递的参数 (例如 `python train.py --learning_rate 0.0001`) 具有最高优先级，
 #     会覆盖YAML文件中定义的所有同名参数。
 
@@ -21,253 +21,221 @@
 # 脚本会根据这里的设置，从下方对应的配置块中加载训练、模型、损失函数等参数。
 # 请确保下方存在与此名称对应的配置块。
 # 可选项: 'vgg_ce_steplr_config', 'vgg_ce_multistep_config', 'vgg_ce_cosine_config', 'vgg_ce_reduce_lr_config', 'vgg_ce_warm_restarts_config',
-#         'vgg_arcface_steplr_config', 'vgg_arcface_multistep_config', 'vgg_arcface_cosine_config', 'vgg_arcface_reduce_lr_config', 'vgg_arcface_warm_restarts_config',
-#         'resnet_ce_steplr_config', 'resnet_ce_multistep_config', 'resnet_ce_cosine_config', 'resnet_ce_reduce_lr_config', 'resnet_ce_warm_restarts_config',
-#         'resnet_arcface_steplr_config', 'resnet_arcface_multistep_config', 'resnet_arcface_cosine_config', 'resnet_arcface_reduce_lr_config', 'resnet_arcface_warm_restarts_config',
-#         或您自定义的其他配置块名
-active_config: vgg_ce_steplr_config # 默认指向一个新配置，方便手动测试
+#          'vgg_arcface_steplr_config', 'vgg_arcface_multistep_config', 'vgg_arcface_cosine_config', 'vgg_arcface_reduce_lr_config', 'vgg_arcface_warm_restarts_config',
+#          'resnet_ce_steplr_config', 'resnet_ce_multistep_config', 'resnet_ce_cosine_config', 'resnet_ce_reduce_lr_config', 'resnet_ce_warm_restarts_config',
+#          'resnet_arcface_steplr_config', 'resnet_arcface_multistep_config', 'resnet_arcface_cosine_config', 'resnet_arcface_reduce_lr_lr_config', 'resnet_arcface_warm_restarts_config'
+active_config: vgg_ce_steplr_config # <--- 您可以根据需要修改这里
 
-# --- 全局设置 (适用于所有模式，通常不需要频繁修改) ---
-# 这些参数会作为基础配置加载，下方选中的配置块会覆盖这里的同名参数。
-# 命令行参数 (--param value) 的优先级最高，会覆盖所有配置。
+# --- 全局设置 (这些设置会被下面的具体配置块覆盖) ---
 global_settings:
-  # --- 运行与环境 ---
-  use_gpu: true           # 是否使用GPU。如果为true但无可用GPU，会自动回退到CPU。
-                          # 命令行参数: --use_gpu (设为True), --no-use_gpu (设为False)。
-  seed: 42                # 随机种子，用于初始化所有随机数生成器，以确保实验的可复现性。
-                          # 设置为None或不设置则不固定随机种子。
-  epochs: 150             # 训练的总轮数。如果从检查点继续训练，此值应大于已训练轮数。
-                          # **重要**: 为了实现所有模型训练相同轮数，请确保所有具体配置块中的 epochs 参数与此一致或被覆盖为相同值。
+  use_gpu: true                  # 是否使用GPU训练
+  resume: false                  # 是否从检查点恢复训练
+  seed: 42                       # 随机种子，用于保证实验的可重复性
+  data_dir: data                 # 数据集根目录
+  model_save_dir: model          # 模型保存目录
+  epochs: 1                      # 默认训练总轮数 (这里设置全局轮数)
+  log_interval: 10               # 训练日志打印间隔 (steps)
+  image_size: 112                # 输入模型图像尺寸 (高和宽相同)
+  num_classes: 100               # 数据集中类别的数量 (根据实际数据集调整)
+  batch_size: 64                 # 训练批大小
+  learning_rate: 0.1             # 默认初始学习率
+  optimizer_type: Momentum       # 默认优化器类型 (Momentum 或 AdamW)
+  optimizer_params:              # 默认优化器参数
+    momentum: 0.9                # Momentum 参数
+    weight_decay: 0.0005         # 权重衰减
+    # AdamW 参数 (如果 optimizer_type 为 AdamW 时生效)
+    # beta1: 0.9
+    # beta2: 0.999
+    # epsilon: 1e-08
+  lr_scheduler_type: StepDecay      # 默认学习率调度器类型 (StepDecay, MultiStepDecay, etc.)
+  lr_scheduler_params:           # 默认学习率调度器参数
+    stepdecay: # <--- 键名匹配工厂函数查找 (无下划线)
+      step_size: 30              # StepDecay 的步长
+      gamma: 0.1                 # StepDecay 的衰减因子
+    multistepdecay: # <--- 键名匹配工厂函数查找 (无下划线)
+      milestones: [30, 60, 90]   # MultiStepDecay 的里程碑
+      gamma: 0.1                 # MultiStepDecay 的衰减因子
+    exponentialdecay: # <--- 键名匹配工厂函数查找 (无下划线)
+      gamma: 0.9                 # ExponentialDecay 的衰减因子
+    reduceonplateau: # <--- 键名匹配工厂函数查找 (无下划线)
+      mode: 'min'                # ReduceOnPlateau 模式 ('min' 或 'max')
+      factor: 0.1                # ReduceOnPlateau 衰减因子
+      patience: 10               # ReduceOnPlateau 耐心值
+      threshold: 0.0001          # ReduceOnPlateau 阈值
+      threshold_mode: 'rel'      # ReduceOnPlateau 阈值模式 ('rel' 或 'abs')
+      cooldown: 0                # ReduceOnPlateau 冷却周期
+      min_lr: 0                  # ReduceOnPlateau 最小学习率
+      eps: 1e-08                 # ReduceOnPlateau eps
+    cosineannealingdecay: # <--- 键名匹配工厂函数查找 (无下划线)
+      T_max: 100                 # CosineAnnealingDecay 的最大迭代次数 (通常设置为总epoch数)
+      eta_min: 0                 # CosineAnnealingDecay 的最小学习率
+    polynomialdecay: # <--- 键名匹配工厂函数查找 (无下划线)
+      decay_steps: 100           # PolynomialDecay 的衰减步数
+      end_lr: 0                  # PolynomialDecay 的最终学习率
+      power: 1.0                 # PolynomialDecay 的多项式次方
+      cycle: False               # PolynomialDecay 是否循环
+    cosineannealingwarmrestarts: # <--- 键名匹配工厂函数查找 (无下划线)
+      T_0: 10                    # CosineAnnealingWarmRestarts 的第一个周期的迭代次数 (通常是一个epoch的step数或总epoch数的一部分)
+      T_mult: 2                  # CosineAnnealingWarmRestarts 的周期长度乘数
+      eta_min: 0                 # CosineAnnealingWarmRestarts 的最小学习率
+      # last_epoch: -1           # 如果从检查点恢复，需要根据当前epoch设置
+    warmup:                      # 学习率预热设置
+      use_warmup: True           # 是否使用预热
+      warmup_steps: 500          # 预热的步数
+      start_lr: 0.001            # 预热开始时的学习率
 
-  # --- 数据相关 ---
-  image_size: 64          # 图像预处理后的统一尺寸 (H和W)。
-                          # 训练、评估、推理时所有输入图像都会被调整到这个尺寸。
-                          # **重要**: 模型加载时会优先使用模型文件中保存的 image_size。
-                          #       如果模型文件没有保存此信息，则使用此处的配置。
-  data_dir: data          # 数据集的根目录。例如，如果数据在 'project_root/data/face_dataset'，则设为 'data'。
-  class_name: face        # 当前使用的数据集子目录名 (位于 `data_dir` 下)。
-                          # 例如，如果完整数据集路径是 `data/face`，则 `class_name` 为 `face`。
-                          # `CreateDataList.py` 会在此目录下生成 `trainer.list` 等文件。
+  model_type: resnet             # 默认模型骨干类型 (vgg 或 resnet)
+  model:                         # 默认模型参数
+    vgg_params:
+      dropout_rate: 0.5          # VGG Dropout 率
+    resnet_params:
+      feature_dim: 512           # ResNet 输出特征维度
+      nf: 32                     # ResNet 初始特征通道数的乘子
+      n_resnet_blocks: 3         # ResNet block 的数量 (不包含stem和最后的avgpool)
 
-  # --- 模型与日志 ---
-  model_save_dir: model # 训练好的模型、检查点以及ArcFace特征库的保存目录。
-  num_classes: 6          # 数据集中的总身份类别数量。
-                          # **非常重要**: 必须根据你实际使用的数据集进行修改！
-                          #       可以运行 `CreateDataList.py` 后，查看生成的 `readme.json` 中的 `total_classes`。
-                          #       自动化脚本会尝试通过 --num_classes 命令行参数覆盖此值。
-  log_interval: 10        # 训练时，每隔多少个batch打印一次训练日志。
-  resume: null            # 控制是否从检查点恢复训练。
-                          #   null (或不设置): 如果检查点文件存在，则自动尝试恢复训练状态；否则从头开始。 (默认行为)
-                          #   true: 强制尝试从检查点恢复。如果检查点不存在，通常会报错或从头开始（取决于脚本实现）。
-                          #   false: 强制从头开始训练，即使检查点文件存在也会忽略。
-                          # 命令行参数: --resume (设为True), --no-resume (设为False) 具有最高优先级。
+  loss_type: arcface             # 默认损失/头部类型 (cross_entropy 或 arcface)
+  loss:                          # 默认损失/头部参数
+    cross_entropy_params: {}     # CrossEntropy 不需要额外参数
+    arcface_params:
+      arcface_m1: 1.0            # ArcFace m1 参数
+      arcface_m2: 0.5            # ArcFace m2 参数
+      arcface_m3: 0.0            # ArcFace m3 参数
+      arcface_s: 64.0            # ArcFace s 参数
 
-  # --- 数据集参数 (由 MyReader.py 使用) ---
-  dataset_params:
-    mean: [0.5, 0.5, 0.5] # 图像归一化时使用的均值 (RGB顺序，范围0-1)。
-                          # 例如，ImageNet常用均值: [0.485, 0.456, 0.406]
-    std: [0.5, 0.5, 0.5]  # 图像归一化时使用的标准差 (RGB顺序，范围0-1)。
-                          # 例如，ImageNet常用标准差: [0.229, 0.224, 0.225]
-    # 训练、验证、测试列表文件的相对路径 (相对于 data_dir/class_name 目录)
-    # 这些文件由 CreateDataList.py 生成。
-    train_list: "trainer.list" # 训练数据列表文件名
-    eval_list: "test.list"     # 评估/验证数据列表文件名 (通常用测试集做验证)
-    # test_list: "test.list"  # 如果有专门的测试集，且与验证集不同，可在此指定
-    # infer_list: "infer_data.list" # 用于批量推理的图像列表文件 (如果 infer.py 支持)
+  dataset_params:                # 数据集相关参数
+    train_list: trainer.list     # 训练列表文件
+    eval_list: test.list         # 评估列表文件
+    num_workers: 8               # 数据加载器 worker 数量 (Windows下建议设为0)
+    mean: [0.5, 0.5, 0.5]        # 图像标准化均值
+    std: [0.5, 0.5, 0.5]        # 图像标准化标准差
 
-    num_workers: 0          # DataLoader加载数据时使用的子进程数量。
-                            # 0 表示在主进程中加载数据。
-                            # 在Windows上，大于0可能导致问题，建议设为0。
-                            # 在Linux上，可以根据CPU核心数适当增加 (例如 2 或 4) 以加速数据加载。
+  infer:                         # 推理相关参数
+    face_library_path:           # 人脸库特征文件路径 (用于 ArcFace 推理和对比)
+    recognition_threshold: 0.0   # 人脸识别阈值 (ArcFace 推理)
+    label_file: readme.json      # 类别标签文件
+    infer_visualize: True        # 是否可视化推理结果
 
-# === 具体配置块 ===
-# 每个配置块代表一种特定的模型和训练策略组合。
-# 请确保每个配置块都有唯一的名称，并在 active_config 列表中列出。
-# 总共应有 4 (模型组合) x 5 (学习率策略) = 20 个配置块。
+  compare:                       # 对比相关参数
+    compare_threshold: 0.8       # 人脸对比阈值 (ArcFace 对比)
+    compare_visualize: True      # 是否可视化对比结果
 
-# --- VGG + CrossEntropy + StepLR 配置块 ---
+  create_library:                # 创建人脸库相关参数
+    output_library_path:         # 输出人脸库特征文件路径
+
+# --- 具体配置块 (覆盖全局设置) ---
+
 vgg_ce_steplr_config:
   model_type: vgg
   loss_type: cross_entropy
   model:
     vgg_params:
       dropout_rate: 0.5
-  loss:
-    cross_entropy_params: {} # CE Loss没有额外的参数
-
-  # 训练超参数
   batch_size: 64
-  learning_rate: 0.1 # StepLR通常从较大的初始学习率开始
-  optimizer_type: Momentum
-  optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-
-  # **专属的学习率调度器配置**
-  lr_scheduler_type: StepLR
+  learning_rate: 0.1
+  # epochs: 5 # <-- 已移除
+  image_size: 64
+  num_classes: 6
+  lr_scheduler_type: StepDecay
   lr_scheduler_params:
-    step_lr:
-      step_size: 30 # 例如，每30个epoch衰减一次
+    stepdecay: # 键名匹配
+      step_size: 30
       gamma: 0.1
     warmup:
-      use_warmup: true # 例如，可以为这个策略启用Warmup
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
 
-  # 推理、对比、建库时的特定参数 (如果与global_settings或默认行为不同)
-  infer:
-    label_file: "readme.json"
-    face_library_path: '' # CE模型不需要特征库
-    recognition_threshold: 0.0 # CE模型直接分类，此阈值通常不使用
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_ce_steplr.pkl' # 建议文件名包含配置信息
-
-# --- VGG + CrossEntropy + MultiStepDecay 配置块 ---
 vgg_ce_multistep_config:
   model_type: vgg
   loss_type: cross_entropy
   model:
     vgg_params:
       dropout_rate: 0.5
-  loss:
-    cross_entropy_params: {}
   batch_size: 64
-  learning_rate: 0.1 # 根据需要调整
-  optimizer_type: Momentum
-  optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
+  learning_rate: 0.1
+  # epochs: 100 # <-- 已移除
+  image_size: 64
+  num_classes: 6
   lr_scheduler_type: MultiStepDecay
   lr_scheduler_params:
-    multi_step_decay:
-      milestones: [50, 100] # 例如，在第50和100个epoch衰减
+    multistepdecay: # 键名匹配
+      milestones: [30, 60, 90]
       gamma: 0.1
     warmup:
-      use_warmup: false # 例如，这个策略不使用Warmup
-      warmup_steps: 500 # 保留参数结构
+      use_warmup: True
+      warmup_steps: 500
       start_lr: 0.001
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_ce_multistep.pkl'
 
-# --- VGG + CrossEntropy + CosineAnnealingDecay 配置块 ---
 vgg_ce_cosine_config:
   model_type: vgg
   loss_type: cross_entropy
   model:
     vgg_params:
       dropout_rate: 0.5
-  loss:
-    cross_entropy_params: {}
   batch_size: 64
-  learning_rate: 0.001 # CosineAnnealing通常从较小的初始学习率开始
-  optimizer_type: AdamW # Changed from Momentum for cosine
-  optimizer_params:
-    weight_decay: 0.0001 # AdamW params
+  learning_rate: 0.1
+  # epochs: 100 # <-- 已移除
+  image_size: 64
+  num_classes: 6
   lr_scheduler_type: CosineAnnealingDecay
   lr_scheduler_params:
-    cosine_annealing_lr: {T_max: 150, eta_min: 0.0} # Key is cosine_annealing_lr (matching type name)
+    cosineannealingdecay: # 键名匹配
+      T_max: 100 # 通常设置为总epochs (现在会使用全局的epochs值)
+      eta_min: 0
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_ce_cosine.pkl'
 
-# --- VGG + CrossEntropy + ReduceLROnPlateau 配置块 ---
 vgg_ce_reduce_lr_config:
   model_type: vgg
   loss_type: cross_entropy
   model:
     vgg_params:
       dropout_rate: 0.5
-  loss:
-    cross_entropy_params: {}
   batch_size: 64
-  learning_rate: 0.01 # ReduceLROnPlateau might start higher
-  optimizer_type: Momentum
-  optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: ReduceLROnPlateau
+  learning_rate: 0.1
+  # epochs: 100 # <-- 已移除
+  image_size: 64
+  num_classes: 6
+  lr_scheduler_type: ReduceOnPlateau
   lr_scheduler_params:
-    reduce_lr_on_plateau: {metric_name: 'loss', mode: 'min', factor: 0.1, patience: 10, threshold: 0.0001}
+    reduceonplateau: # 键名匹配
+      mode: 'min'
+      factor: 0.1
+      patience: 10
+      threshold: 0.0001
+      threshold_mode: 'rel'
+      cooldown: 0
+      min_lr: 0
+      eps: 1e-08 # Preserve this here for now, will remove in factory
     warmup:
-      use_warmup: false
-      warmup_steps: 500
+      use_warmup: False
+      warmup_steps: 0
       start_lr: 0.001
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_ce_reduce_lr.pkl'
 
-# --- VGG + CrossEntropy + CosineAnnealingWarmRestarts 配置块 ---
 vgg_ce_warm_restarts_config:
   model_type: vgg
   loss_type: cross_entropy
   model:
     vgg_params:
       dropout_rate: 0.5
-  loss:
-    cross_entropy_params: {}
   batch_size: 64
-  learning_rate: 0.001 # 根据需要调整初始学习率
-  optimizer_type: AdamW # 根据需要选择优化器
-  optimizer_params:
-    weight_decay: 0.0001 # 根据需要调整参数
-
-  # **专属的学习率调度器配置**
+  learning_rate: 0.1
+  # epochs: 100 # <-- 已移除 (注意这里的 T_0 是周期，需要和总epoch数配合)
+  image_size: 64
+  num_classes: 6
   lr_scheduler_type: CosineAnnealingWarmRestarts
   lr_scheduler_params:
-    cosine_annealing_warm_restarts: # **这个键名必须与 lr_scheduler_type 匹配 (小写)**
-      T_0: 10           # 第一个重启周期内的迭代次数 (通常是epochs)。例如，如果总epochs是150，T_0=10, T_mult=2，周期将是 10, 20, 40, 80...
-      T_mult: 2         # 重启后，周期的乘法因子 (T_i = T_0 * T_mult^(i-1))。
-      eta_min: 0.0      # 最小学习率。
-      # verbose: True   # 可选参数，是否在调度器步进时打印信息。
+    cosineannealingwarmrestarts: # 键名匹配
+      T_0: 10 # 例如，每10个epoch重启一次
+      T_mult: 2
+      eta_min: 0
     warmup:
-      use_warmup: false # 根据需要启用Warmup
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
 
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_ce_warm_restarts.pkl'
-
-# --- VGG + ArcFace ---
-# 为 VGG + ArcFace 创建 5 个配置块，结构类似 VGG + CE，但 loss_type 和 loss.arcface_params 不同
-# 示例：
 vgg_arcface_steplr_config:
   model_type: vgg
   loss_type: arcface
@@ -280,26 +248,27 @@ vgg_arcface_steplr_config:
       arcface_m2: 0.5
       arcface_m3: 0.0
       arcface_s: 64.0
-  batch_size: 32 # ArcFace通常使用较小的batch size
+  batch_size: 64
   learning_rate: 0.1
-  optimizer_type: Momentum
-  optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: StepLR
+  # epochs: 50 # <-- 已移除
+  image_size: 64
+  num_classes: 6 # ArcFace 需要 num_classes 来初始化头部
+  lr_scheduler_type: StepDecay
   lr_scheduler_params:
-    step_lr: {step_size: 30, gamma: 0.1}
-    warmup: {use_warmup: true, warmup_steps: 500, start_lr: 0.001}
-  infer:
-    face_library_path: 'model/face_library_vgg_arcface_steplr.pkl' # ArcFace模型需要特征库
-    recognition_threshold: 0.5 # ArcFace识别阈值
-    label_file: "readme.json"
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
+    stepdecay: # 键名匹配
+      step_size: 15 # 步长根据总epoch调整 (现在是全局epochs)
+      gamma: 0.1
+    warmup:
+      use_warmup: True
+      warmup_steps: 500
+      start_lr: 0.001
   create_library:
-    output_library_path: 'model/face_library_vgg_arcface_steplr.pkl'
+    output_library_path: model/face_library_vgg_arcface_steplr.pkl
+  infer:
+    face_library_path: model/face_library_vgg_arcface_steplr.pkl # 推理时使用训练好的库
+    recognition_threshold: 0.5 # ArcFace 推理阈值
+  compare:
+    compare_threshold: 0.8 # ArcFace 对比阈值
 
 vgg_arcface_multistep_config:
   model_type: vgg
@@ -313,29 +282,27 @@ vgg_arcface_multistep_config:
       arcface_m2: 0.5
       arcface_m3: 0.0
       arcface_s: 64.0
-  batch_size: 32
+  batch_size: 64
   learning_rate: 0.1
-  optimizer_type: Momentum
-  optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
+  # epochs: 100 # <-- 已移除
+  image_size: 64
+  num_classes: 6
   lr_scheduler_type: MultiStepDecay
   lr_scheduler_params:
-    multi_step_decay: {milestones: [50, 100], gamma: 0.1}
+    multistepdecay: # 键名匹配
+      milestones: [30, 60, 90]
+      gamma: 0.1
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
+  create_library:
+    output_library_path: model/face_library_vgg_arcface_multistep.pkl
   infer:
-    face_library_path: 'model/face_library_vgg_arcface_multistep.pkl'
+    face_library_path: model/face_library_vgg_arcface_multistep.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_arcface_multistep.pkl'
 
 vgg_arcface_cosine_config:
   model_type: vgg
@@ -349,28 +316,27 @@ vgg_arcface_cosine_config:
       arcface_m2: 0.5
       arcface_m3: 0.0
       arcface_s: 64.0
-  batch_size: 32
-  learning_rate: 0.001
-  optimizer_type: AdamW
-  optimizer_params:
-    weight_decay: 0.0001
+  batch_size: 64
+  learning_rate: 0.1
+  # epochs: 100 # <-- 已移除
+  image_size: 64
+  num_classes: 6
   lr_scheduler_type: CosineAnnealingDecay
   lr_scheduler_params:
-    cosine_annealing_lr: {T_max: 150, eta_min: 0.0}
+    cosineannealingdecay: # 键名匹配
+      T_max: 100 # 通常设置为总epochs (现在会使用全局的epochs值)
+      eta_min: 0
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
+  create_library:
+    output_library_path: model/face_library_vgg_arcface_cosine.pkl
   infer:
-    face_library_path: 'model/face_library_vgg_arcface_cosine.pkl'
+    face_library_path: model/face_library_vgg_arcface_cosine.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_arcface_cosine.pkl'
 
 vgg_arcface_reduce_lr_config:
   model_type: vgg
@@ -384,29 +350,34 @@ vgg_arcface_reduce_lr_config:
       arcface_m2: 0.5
       arcface_m3: 0.0
       arcface_s: 64.0
-  batch_size: 32
-  learning_rate: 0.01
-  optimizer_type: Momentum
-  optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: ReduceLROnPlateau
+  batch_size: 64
+  learning_rate: 0.1
+  # epochs: 100 # <-- 已移除
+  image_size: 64
+  num_classes: 6
+  lr_scheduler_type: ReduceOnPlateau
   lr_scheduler_params:
-    reduce_lr_on_plateau: {metric_name: 'loss', mode: 'min', factor: 0.1, patience: 10, threshold: 0.0001}
+    reduceonplateau: # 键名匹配
+      mode: 'min'
+      factor: 0.1
+      patience: 10
+      threshold: 0.0001
+      threshold_mode: 'rel'
+      cooldown: 0
+      min_lr: 0
+      eps: 1e-08 # Preserve this here for now, will remove in factory
     warmup:
-      use_warmup: false
-      warmup_steps: 500
+      use_warmup: False
+      warmup_steps: 0
       start_lr: 0.001
+  create_library:
+    output_library_path: model/face_library_vgg_arcface_reduce_lr.pkl
   infer:
-    face_library_path: 'model/face_library_vgg_arcface_reduce_lr.pkl'
+    face_library_path: model/face_library_vgg_arcface_reduce_lr.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_arcface_reduce_lr.pkl'
+
 
 vgg_arcface_warm_restarts_config:
   model_type: vgg
@@ -420,36 +391,29 @@ vgg_arcface_warm_restarts_config:
       arcface_m2: 0.5
       arcface_m3: 0.0
       arcface_s: 64.0
-  batch_size: 32
-  learning_rate: 0.001
-  optimizer_type: AdamW
-  optimizer_params:
-    weight_decay: 0.0001
+  batch_size: 64
+  learning_rate: 0.1
+  # epochs: 100 # <-- 已移除 (注意这里的 T_0 是周期，需要和总epoch数配合)
+  image_size: 64
+  num_classes: 6
   lr_scheduler_type: CosineAnnealingWarmRestarts
   lr_scheduler_params:
-    cosine_annealing_warm_restarts: # **键名匹配**
-      T_0: 10
+    cosineannealingwarmrestarts: # 键名匹配
+      T_0: 10 # 例如，每10个epoch重启一次
       T_mult: 2
-      eta_min: 0.0
+      eta_min: 0
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
+  create_library:
+    output_library_path: model/face_library_vgg_arcface_warm_restarts.pkl
   infer:
-    face_library_path: 'model/face_library_vgg_arcface_warm_restarts.pkl'
+    face_library_path: model/face_library_vgg_arcface_warm_restarts.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_vgg_arcface_warm_restarts.pkl'
 
-
-# --- ResNet + CrossEntropy ---
-# 为 ResNet + CE 创建 5 个配置块，结构类似 VGG + CE，但 model_type 和 model.resnet_params 不同
-# 示例：
 resnet_ce_steplr_config:
   model_type: resnet
   loss_type: cross_entropy
@@ -458,28 +422,23 @@ resnet_ce_steplr_config:
       feature_dim: 512
       nf: 32
       n_resnet_blocks: 3
-  loss:
-    cross_entropy_params: {}
-  batch_size: 32 # ResNet通常使用较小的batch size
-  learning_rate: 0.1
-  optimizer_type: Momentum
+  batch_size: 32
+  learning_rate: 0.01
+  optimizer_type: AdamW
   optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: StepLR
+    weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100
+  lr_scheduler_type: StepDecay
   lr_scheduler_params:
-    step_lr: {step_size: 30, gamma: 0.1}
-    warmup: {use_warmup: true, warmup_steps: 500, start_lr: 0.001}
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_ce_steplr.pkl'
+    stepdecay: # 键名匹配
+      step_size: 30
+      gamma: 0.1
+    warmup:
+      use_warmup: True
+      warmup_steps: 500
+      start_lr: 0.001
 
 resnet_ce_multistep_config:
   model_type: resnet
@@ -489,30 +448,23 @@ resnet_ce_multistep_config:
       feature_dim: 512
       nf: 32
       n_resnet_blocks: 3
-  loss:
-    cross_entropy_params: {}
   batch_size: 32
-  learning_rate: 0.1
-  optimizer_type: Momentum
+  learning_rate: 0.01
+  optimizer_type: AdamW
   optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
+    weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100
   lr_scheduler_type: MultiStepDecay
   lr_scheduler_params:
-    multi_step_decay: {milestones: [50, 100], gamma: 0.1}
-    warmup: {use_warmup: false}
-    warmup_steps: 500
-    start_lr: 0.001
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_ce_multistep.pkl'
+    multistepdecay: # 键名匹配
+      milestones: [30, 60, 90]
+      gamma: 0.1
+    warmup:
+      use_warmup: True
+      warmup_steps: 500
+      start_lr: 0.001
 
 resnet_ce_cosine_config:
   model_type: resnet
@@ -522,30 +474,23 @@ resnet_ce_cosine_config:
       feature_dim: 512
       nf: 32
       n_resnet_blocks: 3
-  loss:
-    cross_entropy_params: {}
   batch_size: 32
-  learning_rate: 0.001
+  learning_rate: 0.01
   optimizer_type: AdamW
   optimizer_params:
     weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100
   lr_scheduler_type: CosineAnnealingDecay
   lr_scheduler_params:
-    cosine_annealing_lr: {T_max: 150, eta_min: 0.0}
+    cosineannealingdecay: # 键名匹配
+      T_max: 100 # 通常设置为总epochs (现在会使用全局的epochs值)
+      eta_min: 0
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_ce_cosine.pkl'
 
 resnet_ce_reduce_lr_config:
   model_type: resnet
@@ -555,31 +500,29 @@ resnet_ce_reduce_lr_config:
       feature_dim: 512
       nf: 32
       n_resnet_blocks: 3
-  loss:
-    cross_entropy_params: {}
   batch_size: 32
   learning_rate: 0.01
-  optimizer_type: Momentum
+  optimizer_type: AdamW
   optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: ReduceLROnPlateau
+    weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100
+  lr_scheduler_type: ReduceOnPlateau
   lr_scheduler_params:
-    reduce_lr_on_plateau: {metric_name: 'loss', mode: 'min', factor: 0.1, patience: 10, threshold: 0.0001}
+    reduceonplateau: # 键名匹配
+      mode: 'min'
+      factor: 0.1
+      patience: 10
+      threshold: 0.0001
+      threshold_mode: 'rel'
+      cooldown: 0
+      min_lr: 0
+      eps: 1e-08 # Preserve this here for now, will remove in factory
     warmup:
-      use_warmup: false
-      warmup_steps: 500
+      use_warmup: False
+      warmup_steps: 0
       start_lr: 0.001
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_ce_reduce_lr.pkl'
 
 resnet_ce_warm_restarts_config:
   model_type: resnet
@@ -589,37 +532,25 @@ resnet_ce_warm_restarts_config:
       feature_dim: 512
       nf: 32
       n_resnet_blocks: 3
-  loss:
-    cross_entropy_params: {}
   batch_size: 32
-  learning_rate: 0.001
+  learning_rate: 0.01
   optimizer_type: AdamW
   optimizer_params:
     weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除 (注意这里的 T_0 是周期，需要和总epoch数配合)
+  image_size: 112
+  num_classes: 100
   lr_scheduler_type: CosineAnnealingWarmRestarts
   lr_scheduler_params:
-    cosine_annealing_warm_restarts: # **键名匹配**
+    cosineannealingwarmrestarts: # 键名匹配
       T_0: 10
       T_mult: 2
-      eta_min: 0.0
+      eta_min: 0
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
-  infer:
-    label_file: "readme.json"
-    face_library_path: ''
-    recognition_threshold: 0.0
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_ce_warm_restarts.pkl'
 
-# --- ResNet + ArcFace ---
-# 为 ResNet + ArcFace 创建 5 个配置块，结构类似 VGG + ArcFace，但 model_type 和 model.resnet_params 不同
-# 示例：
 resnet_arcface_steplr_config:
   model_type: resnet
   loss_type: arcface
@@ -635,25 +566,29 @@ resnet_arcface_steplr_config:
       arcface_m3: 0.0
       arcface_s: 64.0
   batch_size: 32
-  learning_rate: 0.1
-  optimizer_type: Momentum
+  learning_rate: 0.001
+  optimizer_type: AdamW
   optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: StepLR
+    weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100 # ArcFace 需要 num_classes 来初始化头部
+  lr_scheduler_type: StepDecay
   lr_scheduler_params:
-    step_lr: {step_size: 30, gamma: 0.1}
-    warmup: {use_warmup: true, warmup_steps: 500, start_lr: 0.001}
+    stepdecay: # 键名匹配
+      step_size: 30
+      gamma: 0.1
+    warmup:
+      use_warmup: True
+      warmup_steps: 500
+      start_lr: 0.001
+  create_library:
+    output_library_path: model/face_library_resnet_arcface_steplr.pkl
   infer:
-    face_library_path: 'model/face_library_resnet_arcface_steplr.pkl'
+    face_library_path: model/face_library_resnet_arcface_steplr.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_arcface_steplr.pkl'
 
 resnet_arcface_multistep_config:
   model_type: resnet
@@ -670,27 +605,29 @@ resnet_arcface_multistep_config:
       arcface_m3: 0.0
       arcface_s: 64.0
   batch_size: 32
-  learning_rate: 0.1
-  optimizer_type: Momentum
+  learning_rate: 0.001
+  optimizer_type: AdamW
   optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
+    weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100
   lr_scheduler_type: MultiStepDecay
   lr_scheduler_params:
-    multi_step_decay: {milestones: [50, 100], gamma: 0.1}
-    warmup: {use_warmup: false}
-    warmup_steps: 500
-    start_lr: 0.001
+    multistepdecay: # 键名匹配
+      milestones: [30, 60, 90]
+      gamma: 0.1
+    warmup:
+      use_warmup: True
+      warmup_steps: 500
+      start_lr: 0.001
+  create_library:
+    output_library_path: model/face_library_resnet_arcface_multistep.pkl
   infer:
-    face_library_path: 'model/face_library_resnet_arcface_multistep.pkl'
+    face_library_path: model/face_library_resnet_arcface_multistep.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_arcface_multistep.pkl'
 
 resnet_arcface_cosine_config:
   model_type: resnet
@@ -711,25 +648,27 @@ resnet_arcface_cosine_config:
   optimizer_type: AdamW
   optimizer_params:
     weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100
   lr_scheduler_type: CosineAnnealingDecay
   lr_scheduler_params:
-    cosine_annealing_lr: {T_max: 150, eta_min: 0.0}
+    cosineannealingdecay: # 键名匹配
+      T_max: 100 # 通常设置为总epochs (现在会使用全局的epochs值)
+      eta_min: 0
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
+  create_library:
+    output_library_path: model/face_library_resnet_arcface_cosine.pkl
   infer:
-    face_library_path: 'model/face_library_resnet_arcface_cosine.pkl'
+    face_library_path: model/face_library_resnet_arcface_cosine.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_arcface_cosine.pkl'
 
-resnet_arcface_reduce_lr_config:
+resnet_arcface_reduce_lr_lr_config: # 注意这里的键名可能有点问题，多了一个 _lr
   model_type: resnet
   loss_type: arcface
   model:
@@ -744,14 +683,24 @@ resnet_arcface_reduce_lr_config:
       arcface_m3: 0.0
       arcface_s: 64.0
   batch_size: 32
-  learning_rate: 0.01
-  optimizer_type: Momentum
+  learning_rate: 0.0001 # ReduceOnPlateau 通常配合较低的初始学习率
+  optimizer_type: AdamW
   optimizer_params:
-    momentum: 0.9
-    weight_decay: 0.0005
-  lr_scheduler_type: ReduceLROnPlateau
+    weight_decay: 0.0001
+  # epochs: 100 # <-- 已移除
+  image_size: 112
+  num_classes: 100
+  lr_scheduler_type: ReduceOnPlateau
   lr_scheduler_params:
-    reduce_lr_on_plateau: {metric_name: 'loss', mode: 'min', factor: 0.1, patience: 10, threshold: 0.0001}
+    reduceonplateau: # 键名匹配
+      mode: 'min'
+      factor: 0.1
+      patience: 10
+      threshold: 0.0001
+      threshold_mode: 'rel'
+      cooldown: 0
+      min_lr: 0.0000001
+      eps: 1e-08 # Preserve this here for now, will remove in factory
     warmup:
       use_warmup: false
       warmup_steps: 500
@@ -788,26 +737,21 @@ resnet_arcface_warm_restarts_config:
     weight_decay: 0.0001
   lr_scheduler_type: CosineAnnealingWarmRestarts
   lr_scheduler_params:
-    cosine_annealing_warm_restarts: # **键名匹配**
+    cosineannealingwarmrestarts: # 键名匹配
       T_0: 10
       T_mult: 2
-      eta_min: 0.0
+      eta_min: 0
     warmup:
-      use_warmup: false
+      use_warmup: True
       warmup_steps: 500
       start_lr: 0.001
+  # epochs: 100 # <-- 已移除 (注意这里的 T_0 是周期，需要和总epoch数配合)
+  image_size: 112
+  num_classes: 100
+  create_library:
+    output_library_path: model/face_library_resnet_arcface_warm_restarts.pkl
   infer:
-    face_library_path: 'model/face_library_resnet_arcface_warm_restarts.pkl'
+    face_library_path: model/face_library_resnet_arcface_warm_restarts.pkl
     recognition_threshold: 0.5
-    label_file: "readme.json"
-    infer_visualize: true
   compare:
     compare_threshold: 0.8
-    compare_visualize: true
-  create_library:
-    output_library_path: 'model/face_library_resnet_arcface_warm_restarts.pkl'
-
-# --- 更多配置块可以在此添加 ---
-# 例如，针对不同数据集、不同ResNet深度、或其他损失函数的配置。
-# custom_experiment_config:
-#   ...

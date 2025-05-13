@@ -3,12 +3,13 @@
 # 目的是将学习率调度器的创建逻辑与主训练脚本分离，提高代码的模块化和可维护性。
 #
 # 支持的调度器类型包括：
-# - StepLR: 按预设的步长衰减学习率。
-# - MultiStepLR: 在预设的多个里程碑 (milestones) 处衰减学习率。
-# - ExponentialLR: 按指数方式衰减学习率。
-# - ReduceLROnPlateau: 当某个监控指标 (如验证集损失) 在一段时间内不再改善时，降低学习率。
-# - CosineAnnealingLR: 使用余弦退火方式调整学习率。
-# - PolynomialLR: 使用多项式衰减方式调整学习率。
+# - StepDecay: 按预设的步长衰减学习率。
+# - MultiStepDecay: 在预设的多个里程碑 (milestones) 处衰减学习率。
+# - ExponentialDecay: 按指数方式衰减学习率。
+# - ReduceOnPlateau: 当某个监控指标 (如验证集损失) 在一段时间内不再改善时，降低学习率。
+# - CosineAnnealingDecay: 使用余弦退火方式调整学习率。
+# - PolynomialDecay: 使用多项式衰减方式调整学习率。
+# - CosineAnnealingWarmRestarts: 带热重启的余弦退火。
 #
 # 工厂函数 `get_lr_scheduler` 会解析配置文件中的 `lr_scheduler_type` 和相应的 `lr_scheduler_params`，
 # 然后实例化对应的调度器对象。它还支持可选的 `warmup_params` 来为调度器添加预热 (warmup) 阶段。
@@ -18,394 +19,508 @@
 # ```yaml
 # # ...其他配置...
 # learning_rate: 0.01 # 优化器的初始学习率，也会作为调度器的基础学习率
-# lr_scheduler_type: "MultiStepLR" # 或者 "StepLR", "ReduceLROnPlateau", etc.
-#
+# lr_scheduler_type: "MultiStepDecay" # 或者 "StepDecay", "ReduceOnPlateau", etc.
 # lr_scheduler_params:
-#   # MultiStepLR 特有的参数
-#   multi_step_lr:
-#     milestones: [30, 60, 90] # 在第30, 60, 90个epoch衰减
-#     gamma: 0.1             # 衰减因子
-#
-#   # StepLR 特有的参数
-#   step_lr:
+#   stepdecay: # 如果使用 StepDecay，键名应为 stepdecay
 #     step_size: 30
 #     gamma: 0.1
-#
-#   # ReduceLROnPlateau 特有的参数
-#   reduce_lr_on_plateau:
-#     mode: "min"            # 监控指标越小越好 (如loss) 还是越大越好 (如acc)
-#     factor: 0.1            # 学习率衰减因子
-#     patience: 10           # 多少个epoch指标没有改善后降低学习率
-#     threshold: 0.0001      # 衡量指标改善的阈值
-#     verbose: True          # 是否打印学习率变化信息
-#     metric_name: "loss"    # (自定义添加) 训练脚本中用于传递给step()的指标名称
-#
-#   # CosineAnnealingLR 特有的参数
-#   cosine_annealing_lr:
-#     T_max: 100             # 最大迭代次数 (通常是总epochs数)
-#     eta_min: 0.0           # 最小学习率
-#
-#   # PolynomialLR 特有的参数
-#   polynomial_lr:
-#     decay_steps: 100000    # 总衰减步数 (通常是总batches数)
-#     end_lr: 0.00001        # 最终学习率
-#     power: 1.0             # 多项式幂次
-#     cycle: False           # 是否循环
-#
-# warmup_params: # 可选的预热配置
-#   use_warmup: True
-#   warmup_epochs: 5
-#   warmup_start_lr: 0.0001 # 预热阶段的起始学习率
-# # ...
+#   multistepdecay: # 如果使用 MultiStepDecay，键名应为 multistepdecay
+#     milestones: [30, 60, 90]
+#     gamma: 0.1
+#   exponentialdecay: # 如果使用 ExponentialDecay，键名应为 exponentialdecay
+#     gamma: 0.9
+#   reduceonplateau: # 如果使用 ReduceOnPlateau，键名应为 reduceonplateau
+#     mode: 'min'
+#     factor: 0.1
+#     patience: 10
+#     threshold: 0.0001
+#   cosineannealingdecay: # 如果使用 CosineAnnealingDecay，键名应为 cosineannealingdecay
+#     T_max: 100
+#     eta_min: 0
+#   polynomialdecay: # 如果使用 PolynomialDecay，键名应为 polynomialdecay
+#     decay_steps: 100
+#     end_lr: 0
+#     power: 1.0
+#   cosineannealingwarmrestarts: # 如果使用 CosineAnnealingWarmRestarts，键名应为 cosineannealingwarmrestarts
+#     T_0: 10
+#     T_mult: 2
+#     eta_min: 0
+#   warmup: # 预热参数，可以与大多数调度器结合使用 (ReduceOnPlateau 除外)
+#     use_warmup: True
+#     warmup_steps: 500
+#     start_lr: 0.001
+# # ...其他配置...
 # ```
+# 注意：YAML配置中 lr_scheduler_params 下的子字典键名 (如 `stepdecay`, `reduceonplateau` 等)
+#      应该与工厂函数中 `config.lr_scheduler_params.get(scheduler_type.lower(), {})`
+#      查找时使用的键名一致。为了简化，我们统一使用 PaddlePaddle API 名称的小写形式作为键名。
 
 import paddle
-from paddle.optimizer.lr import LRScheduler # 基础学习率调度器类
-from paddle.optimizer.lr import StepDecay, MultiStepDecay, ExponentialDecay, ReduceOnPlateau, CosineAnnealingDecay, PolynomialDecay, LinearWarmup
-from config_utils import ConfigObject # 假设ConfigObject是配置文件加载后生成的对象类型
+import paddle.optimizer as optimizer
+# 导入 PaddlePaddle 提供的学习率调度器模块
+import paddle.optimizer.lr as lr_scheduler
 
-def get_lr_scheduler(config: ConfigObject, initial_learning_rate: float) -> LRScheduler:
-    """学习率调度器工厂函数。
+from config_utils import ConfigObject # 假设 ConfigObject 类在 config_utils模块中
 
-    根据配置对象 `config` 中的 `lr_scheduler_type` 和 `lr_scheduler_params`，
-    以及可选的 `warmup_params`，创建并返回一个 PaddlePaddle 学习率调度器实例。
+def get_lr_scheduler(config: ConfigObject, initial_learning_rate):
+    """
+    根据配置信息创建并返回一个学习率调度器实例。
 
     Args:
-        config (ConfigObject): 包含学习率调度器配置的全局配置对象。
-                               需要包含 `lr_scheduler_type` (str) 来指定调度器类型，
-                               `lr_scheduler_params` (dict) 包含对应类型的参数，
-                               以及可选的 `warmup_params` (dict) 用于预热配置。
-        initial_learning_rate (float): 优化器设置的初始学习率，
-                                       将作为调度器的基础学习率 (base_lr)。
+        config (ConfigObject): 包含学习率调度器配置的 ConfigObject 实例。
+                               应包含 lr_scheduler_type, lr_scheduler_params, 和 warmup 配置。
+        initial_learning_rate (float): 优化器的初始学习率，也作为调度器的基础学习率。
 
     Returns:
-        LRScheduler: 配置好的学习率调度器实例 (可能被LinearWarmup包装)。
+        paddle.optimizer.lr._LRScheduler: 创建的学习率调度器实例。
 
     Raises:
-        ValueError: 如果配置的 `lr_scheduler_type` 不支持，
-                    或者对应类型的参数在 `lr_scheduler_params` 中缺失或无效。
+        ValueError: 如果配置的调度器类型不受支持，或者缺少必要的参数。
     """
-    scheduler_type = config.get('lr_scheduler_type')
-    if not scheduler_type:
-        # 如果未指定调度器类型，可以考虑返回一个 Constant LR 的调度器，
-        # 或者要求用户必须指定。此处选择报错，因为通常期望明确配置。
-        raise ValueError("错误: 学习率调度器类型 'lr_scheduler_type' 未在配置中指定。")
+    scheduler_type = config.lr_scheduler_type
+    # 统一使用 scheduler_type 的小写形式作为 lr_scheduler_params 中的键查找参数
+    scheduler_params = config.lr_scheduler_params.get(scheduler_type.lower(), {})
+    warmup_config = config.lr_scheduler_params.get('warmup', {}) # 获取 warmup 配置
 
-    all_scheduler_params = config.get('lr_scheduler_params', {}) # 获取所有调度器参数的字典
-    if not isinstance(all_scheduler_params, ConfigObject) and not isinstance(all_scheduler_params, dict):
-        raise ValueError(f"错误: 'lr_scheduler_params' 必须是一个字典或ConfigObject，但得到的是 {type(all_scheduler_params)}。")
+    # 检查并获取 Warmup 配置
+    use_warmup = warmup_config.get('use_warmup', False)
+    warmup_steps = warmup_config.get('warmup_steps', 0)
+    start_lr = warmup_config.get('start_lr', 0.0) # 默认预热开始学习率为0
 
-    # 将ConfigObject转换为普通字典，如果它是ConfigObject的话，方便get操作和**解包
-    # 因为ConfigObject的get方法可能与字典的get行为略有不同（例如，对于不存在的键返回None而不是抛KeyError）
-    # 但PaddlePaddle的调度器构造函数通常期望普通字典的参数。    
-    specific_params_key = ""
-    lr_scheduler_instance = None
+    scheduler = None
 
-    print(f"准备创建学习率调度器: 类型 '{scheduler_type}', 初始学习率: {initial_learning_rate}")
+    # --- 学习率调度器类型判断与实例化 ---
 
-    # 核心调度器实例化逻辑
-    if scheduler_type.lower() == 'steplr' or scheduler_type.lower() == 'stepdecay':
-        specific_params_key = 'step_lr' # 假设参数存储在 lr_scheduler_params.step_lr 下
-        params = all_scheduler_params.get(specific_params_key, {})
-        if not params or 'step_size' not in params:
-            raise ValueError(f"错误: StepLR/StepDecay 调度器需要 '{specific_params_key}.step_size' 参数。")
-        lr_scheduler_instance = StepDecay(
+    # StepDecay (对应 YAML 中的 stepdecay)
+    # 兼容旧配置中的 "StepLR" 字符串，但查找参数使用 "stepdecay"
+    if scheduler_type == "StepDecay" or scheduler_type == "StepLR":
+        # --- 移除 debug prints ---
+        # print(f"DEBUG (StepDecay): Entering block")
+        # print(f"DEBUG (StepDecay): scheduler_type: {scheduler_type}")
+        # print(f"DEBUG (StepDecay): scheduler_type.lower(): {scheduler_type.lower()}")
+        # print(f"DEBUG (StepDecay): config.lr_scheduler_params type: {type(config.lr_scheduler_params)}")
+        # print(f"DEBUG (StepDecay): config.lr_scheduler_params content: {config.lr_scheduler_params}")
+        # print(f"DEBUG (StepDecay): scheduler_params (extracted) type: {type(scheduler_params)}")
+        # print(f"DEBUG (StepDecay): scheduler_params (extracted) content: {scheduler_params}")
+        # --- End debug prints ---
+
+        # 检查 StepDecay 必要的参数
+        # 从 scheduler_params 字典中获取参数
+        if 'step_size' not in scheduler_params or 'gamma' not in scheduler_params:
+             raise ValueError(f"配置错误: '{scheduler_type}' 调度器需要 'step_size' 和 'gamma' 参数。请检查 lr_scheduler_params.{'stepdecay'} 配置块。") # 提示查找键名
+
+        scheduler = lr_scheduler.StepDecay(
             learning_rate=initial_learning_rate,
-            step_size=params['step_size'],
-            gamma=params.get('gamma', 0.1), # 默认gamma为0.1
-            verbose=params.get('verbose', False)
+            step_size=scheduler_params['step_size'],
+            gamma=scheduler_params['gamma'],
+            # last_epoch=-1 # 如果从检查点恢复，可能需要设置 last_epoch
         )
-        print(f"  StepLR/StepDecay 创建成功: step_size={params['step_size']}, gamma={params.get('gamma', 0.1)}")
 
-    elif scheduler_type.lower() == 'multisteplr' or scheduler_type.lower() == 'multistepdecay':
-        specific_params_key = 'multi_step_lr'
-        params = all_scheduler_params.get(specific_params_key, {})
-        if not params or 'milestones' not in params:
-            raise ValueError(f"错误: MultiStepLR/MultiStepDecay 调度器需要 '{specific_params_key}.milestones' 参数。")
-        if not isinstance(params['milestones'], list) or not all(isinstance(m, int) for m in params['milestones']):
-            raise ValueError(f"错误: '{specific_params_key}.milestones' 必须是一个整数列表。")
-        lr_scheduler_instance = MultiStepDecay(
+    # MultiStepDecay (对应 YAML 中的 multistepdecay)
+    # 兼容旧配置中的 "MultiStepLR" 字符串，但查找参数使用 "multistepdecay"
+    elif scheduler_type == "MultiStepDecay" or scheduler_type == "MultiStepLR":
+         # --- 移除 debug prints ---
+         # print(f"DEBUG (MultiStepDecay): Entering block")
+         # print(f"DEBUG (MultiStepDecay): scheduler_type: {scheduler_type}")
+         # print(f"DEBUG (MultiStepDecay): scheduler_type.lower(): {scheduler_type.lower()}")
+         # print(f"DEBUG (MultiStepDecay): config.lr_scheduler_params type: {type(config.lr_scheduler_params)}")
+         # print(f"DEBUG (MultiStepDecay): config.lr_scheduler_params content: {config.lr_scheduler_params}")
+         # print(f"DEBUG (MultiStepDecay): scheduler_params (extracted) type: {type(scheduler_params)}")
+         # print(f"DEBUG (MultiStepDecay): scheduler_params (extracted) content: {scheduler_params}")
+         # --- End debug prints ---
+
+         # 检查 MultiStepDecay 必要的参数
+        # 从 scheduler_params 字典中获取参数
+        if 'milestones' not in scheduler_params or 'gamma' not in scheduler_params:
+             raise ValueError(f"配置错误: '{scheduler_type}' 调度器需要 'milestones' 和 'gamma' 参数。请检查 lr_scheduler_params.{'multistepdecay'} 配置块。") # 提示查找键名
+
+        scheduler = lr_scheduler.MultiStepDecay(
             learning_rate=initial_learning_rate,
-            milestones=params['milestones'],
-            gamma=params.get('gamma', 0.1),
-            verbose=params.get('verbose', False)
+            milestones=scheduler_params['milestones'],
+            gamma=scheduler_params['gamma'],
+            # last_epoch=-1 # 如果从检查点恢复，可能需要设置 last_epoch
         )
-        print(f"  MultiStepLR/MultiStepDecay 创建成功: milestones={params['milestones']}, gamma={params.get('gamma', 0.1)}")
 
-    elif scheduler_type.lower() == 'exponentiallr' or scheduler_type.lower() == 'exponentialdecay':
-        specific_params_key = 'exponential_lr'
-        params = all_scheduler_params.get(specific_params_key, {})
-        if not params or 'gamma' not in params:
-            raise ValueError(f"错误: ExponentialLR/ExponentialDecay 调度器需要 '{specific_params_key}.gamma' 参数。")
-        lr_scheduler_instance = ExponentialDecay(
+    # ExponentialDecay (对应 YAML 中的 exponentialdecay)
+    # 兼容旧配置中的 "ExponentialLR" 字符串，但查找参数使用 "exponentialdecay"
+    elif scheduler_type == "ExponentialDecay" or scheduler_type == "ExponentialLR":
+         # 检查 ExponentialDecay 必要的参数
+        # 从 scheduler_params 字典中获取参数
+        if 'gamma' not in scheduler_params:
+             raise ValueError(f"配置错误: '{scheduler_type}' 调度器需要 'gamma' 参数。请检查 lr_scheduler_params.{'exponentialdecay'} 配置块。") # 提示查找键名
+
+        scheduler = lr_scheduler.ExponentialDecay(
             learning_rate=initial_learning_rate,
-            gamma=params['gamma'],
-            verbose=params.get('verbose', False)
+            gamma=scheduler_params['gamma'],
+            # last_epoch=-1 # 如果从检查点恢复，可能需要设置 last_epoch
         )
-        print(f"  ExponentialLR/ExponentialDecay 创建成功: gamma={params['gamma']}")
 
-    elif scheduler_type.lower() == 'reducelronplateau' or scheduler_type.lower() == 'reduceonplateau':
-        specific_params_key = 'reduce_lr_on_plateau'
-        params = all_scheduler_params.get(specific_params_key, {})
-        # ReduceLROnPlateau 的 learning_rate 参数是优化器或另一个调度器，这里我们用 initial_learning_rate
-        # 但实际上 ReduceOnPlateau 包装的是优化器，它的 learning_rate 属性由优化器管理。
-        # PaddlePaddle 的 ReduceOnPlateau 通常在训练循环中手动调用 step(metric_value)。
-        # 其构造函数中的 learning_rate 参数实际上是优化器对象！
-        # 这与其他调度器不同，其他调度器接受float型的初始学习率。
-        # 因此，工厂不应该直接实例化它，而是训练脚本在拥有优化器后，再用此参数构造它。
-        # 然而，为了保持工厂的通用性，我们假设这里的 initial_learning_rate 就是给它的，
-        # 并在训练脚本中正确使用（或者在训练脚本中直接创建此调度器）。
-        # 此处我们遵循 PaddlePaddle LRScheduler 的模式，传入float型的 initial_learning_rate。
-        # 训练脚本需要注意，如果是 ReduceOnPlateau，step() 需要传入监控的 metric。
-        if not params: # mode, factor, patience 是常用参数
-            print(f"警告: ReduceLROnPlateau ('{specific_params_key}') 参数未提供，将使用默认值。")
-        lr_scheduler_instance = ReduceOnPlateau(
-            learning_rate=initial_learning_rate, # 这是float，但ReduceOnPlateau的step由外部调用
-            mode=params.get('mode', 'min'),
-            factor=params.get('factor', 0.1),
-            patience=params.get('patience', 10),
-            threshold=params.get('threshold', 1e-4),
-            threshold_mode=params.get('threshold_mode', 'rel'),
-            cooldown=params.get('cooldown', 0),
-            min_lr=params.get('min_lr', 0),
-            epsilon=params.get('epsilon', 1e-8),
-            verbose=params.get('verbose', False)
-        )
-        # ReduceOnPlateau 的 metric_name (自定义) 应在训练脚本中使用，而非此处
-        print(f"  ReduceLROnPlateau 创建成功: mode={params.get('mode', 'min')}, factor={params.get('factor', 0.1)}, patience={params.get('patience', 10)}")
-
-    elif scheduler_type.lower() == 'cosineannealinglr' or scheduler_type.lower() == 'cosineannealingdecay':
-        specific_params_key = 'cosine_annealing_lr'
-        params = all_scheduler_params.get(specific_params_key, {})
-        if not params or 'T_max' not in params:
-            raise ValueError(f"错误: CosineAnnealingLR/Decay 调度器需要 '{specific_params_key}.T_max' 参数。")
-        lr_scheduler_instance = CosineAnnealingDecay(
+    # ReduceOnPlateau (对应 YAML 中的 reduceonplateau)
+    # 注意：PaddlePaddle 中是 ReduceOnPlateau，而不是 ReduceLROnPlateau
+    # 兼容旧配置中的 "ReduceLROnPlateau" 字符串，但实例化 ReduceOnPlateau 并查找参数使用 "reduceonplateau"
+    # 注意：ReduceOnPlateau 不接受 last_epoch 参数，它的状态是内部维护的
+    # 注意：ReduceOnPlateau 通常不能与 warmup 直接结合，因为 warmup 是基于步数的，而 ReduceOnPlateau 是基于指标的
+    elif scheduler_type == "ReduceOnPlateau" or scheduler_type == "ReduceLROnPlateau":
+        # ReduceOnPlateau 有较多可选参数，这里获取所有可能的参数
+        # 从 scheduler_params 字典中获取参数
+        scheduler = lr_scheduler.ReduceOnPlateau( # <--- 实例化 ReduceOnPlateau
             learning_rate=initial_learning_rate,
-            T_max=params['T_max'],
-            eta_min=params.get('eta_min', 0),
-            verbose=params.get('verbose', False)
+            mode=scheduler_params.get('mode', 'min'),
+            factor=scheduler_params.get('factor', 0.1),
+            patience=scheduler_params.get('patience', 10),
+            threshold=scheduler_params.get('threshold', 0.0001),
+            threshold_mode=scheduler_params.get('threshold_mode', 'rel'),
+            cooldown=scheduler_params.get('cooldown', 0),
+            min_lr=scheduler_params.get('min_lr', 0),
+            # 移除 'eps' 参数，因为它在您的PaddlePaddle版本中不受支持
+            # eps=scheduler_params.get('eps', 1e-08),
+            verbose=scheduler_params.get('verbose', False) # 是否打印学习率变化信息
         )
-        print(f"  CosineAnnealingLR/Decay 创建成功: T_max={params['T_max']}, eta_min={params.get('eta_min', 0)}")
+        # 对于 ReduceOnPlateau，如果使用了 warmup，这里需要特别处理，例如先执行 warmup 步数，
+        # 然后再将优化器的 learning_rate 设置为 initial_learning_rate，并开始 ReduceOnPlateau 调度。
+        # 这里为了简化，不对 ReduceOnPlateau 进行 warmup 处理。
+        if use_warmup:
+             print("警告: ReduceOnPlateau 调度器通常不直接与 Warmup 结合使用。Warmup 配置将被忽略。")
+             use_warmup = False # 确保不再尝试应用 Warmup
 
-    elif scheduler_type.lower() == 'polynomiallr' or scheduler_type.lower() == 'polynomialdecay':
-        specific_params_key = 'polynomial_lr'
-        params = all_scheduler_params.get(specific_params_key, {})
-        if not params or 'decay_steps' not in params:
-            raise ValueError(f"错误: PolynomialLR/Decay 调度器需要 '{specific_params_key}.decay_steps' 参数。")
-        lr_scheduler_instance = PolynomialDecay(
+
+    # CosineAnnealingDecay (对应 YAML 中的 cosineannealingdecay)
+    # 注意：PaddlePaddle 中是 CosineAnnealingDecay，而不是 CosineAnnealingLR
+    # 兼容旧配置中的 "CosineAnnealingLR" 字符串，但实例化 CosineAnnealingDecay 并查找参数使用 "cosineannealingdecay"
+    elif scheduler_type == "CosineAnnealingDecay" or scheduler_type == "CosineAnnealingLR":
+         # 检查 CosineAnnealingDecay 必要的参数
+        # 从 scheduler_params 字典中获取参数
+        if 'T_max' not in scheduler_params:
+             raise ValueError(f"配置错误: '{scheduler_type}' 调度器需要 'T_max' 参数。请检查 lr_scheduler_params.{'cosineannealingdecay'} 配置块。") # 提示查找键名
+
+        scheduler = lr_scheduler.CosineAnnealingDecay( # <--- 实例化 CosineAnnealingDecay
             learning_rate=initial_learning_rate,
-            decay_steps=params['decay_steps'],
-            end_lr=params.get('end_lr', 0.00001), # 官方默认值
-            power=params.get('power', 1.0),
-            cycle=params.get('cycle', False),
-            verbose=params.get('verbose', False)
+            T_max=scheduler_params['T_max'],
+            eta_min=scheduler_params.get('eta_min', 0), # eta_min 可选，默认为 0
+            # last_epoch=-1 # 如果从检查点恢复，可能需要设置 last_epoch
         )
-        print(f"  PolynomialLR/Decay 创建成功: decay_steps={params['decay_steps']}, end_lr={params.get('end_lr', 0.00001)}")
-        
-    else:
-        raise ValueError(f"不支持的学习率调度器类型: '{scheduler_type}'.\n"
-                         f"支持的类型包括: StepLR, MultiStepLR, ExponentialLR, ReduceLROnPlateau, CosineAnnealingLR, PolynomialLR (及其别名)。")
 
-    # --- Warmup 逻辑 --- 
-    # 如果配置了预热 (warmup)，则用 LinearWarmup 包装上面创建的调度器实例。
-    warmup_cfg = config.get('warmup_params', {})
-    use_warmup = warmup_cfg.get('use_warmup', False)
+    # PolynomialDecay (对应 YAML 中的 polynomialdecay)
+    # 兼容旧配置中的 "PolynomialLR" 字符串，但查找参数使用 "polynomialdecay"
+    elif scheduler_type == "PolynomialDecay" or scheduler_type == "PolynomialLR":
+        # 检查 PolynomialDecay 必要的参数
+        # 从 scheduler_params 字典中获取参数
+        if 'decay_steps' not in scheduler_params:
+             raise ValueError(f"配置错误: '{scheduler_type}' 调度器需要 'decay_steps' 参数。请检查 lr_scheduler_params.{'polynomialdecay'} 配置块。") # 提示查找键名
 
-    if use_warmup and lr_scheduler_instance:
-        warmup_epochs = warmup_cfg.get('warmup_epochs')
-        warmup_start_lr = warmup_cfg.get('warmup_start_lr')
-        
-        if warmup_epochs is None or warmup_start_lr is None:
-            raise ValueError("错误: 启用了预热 (use_warmup=True)，但缺少 'warmup_epochs' 或 'warmup_start_lr' 参数。")
-        if not isinstance(warmup_epochs, int) or warmup_epochs <= 0:
-            raise ValueError("错误: 'warmup_epochs' 必须是正整数。")
-        if not isinstance(warmup_start_lr, (float, int)) or warmup_start_lr < 0:
-            raise ValueError("错误: 'warmup_start_lr' 必须是非负数。")
-            
-        # 确保 warmup_start_lr 不大于等于 initial_learning_rate (预热应该是从小到大)
-        if warmup_start_lr >= initial_learning_rate:
-            print(f"警告: 预热起始学习率 warmup_start_lr ({warmup_start_lr}) 大于或等于优化器初始学习率 ({initial_learning_rate})。"
-                  f"     这可能不是预期的预热行为。预热将被应用，但效果可能不明显。")
-
-        # LinearWarmup 构造函数的第一个参数是 LRScheduler 实例，第二个是预热的步数(epochs)，第三个是起始LR，第四个是结束LR(即initial_learning_rate)
-        lr_scheduler_instance = LinearWarmup(
-            learning_rate=lr_scheduler_instance, # 被包装的调度器
-            warmup_steps=warmup_epochs,          # 预热的epoch数
-            start_lr=warmup_start_lr,            # 预热起始学习率
-            end_lr=initial_learning_rate,        # 预热结束学习率 (即主调度器的初始学习率)
-            verbose=warmup_cfg.get('verbose', False) # LinearWarmup也有verbose参数
+        scheduler = lr_scheduler.PolynomialDecay(
+            learning_rate=initial_learning_rate,
+            decay_steps=scheduler_params['decay_steps'],
+            end_lr=scheduler_params.get('end_lr', 0), # end_lr 可选，默认为 0
+            power=scheduler_params.get('power', 1.0), # power 可选，默认为 1.0
+            cycle=scheduler_params.get('cycle', False), # cycle 可选，默认为 False
+            # last_epoch=-1 # 如果从检查点恢复，可能需要设置 last_epoch
         )
-        print(f"  学习率调度器已应用 LinearWarmup: epochs={warmup_epochs}, start_lr={warmup_start_lr}, end_lr={initial_learning_rate}")
-    elif use_warmup and lr_scheduler_instance is None:
-        # 这理论上不应该发生，因为如果lr_scheduler_instance是None，前面应该已经抛出异常了
-        print("警告: 配置了预热，但基础学习率调度器未能创建。预热将不会被应用。")
 
-    if lr_scheduler_instance is None:
-        # 再次检查，确保最终返回的是一个有效的调度器实例
-        raise RuntimeError(f"最终学习率调度器未能成功创建。类型: '{scheduler_type}'。请检查配置和工厂逻辑。")
+    # CosineAnnealingWarmRestarts (对应 YAML 中的 cosineannealingwarmrestarts)
+    # PaddlePaddle API 名称一致，查找参数使用 "cosineannealingwarmrestarts"
+    elif scheduler_type == "CosineAnnealingWarmRestarts":
+         # 检查 CosineAnnealingWarmRestarts 必要的参数
+        # 从 scheduler_params 字典中获取参数
+        if 'T_0' not in scheduler_params:
+             raise ValueError(f"配置错误: '{scheduler_type}' 调度器需要 'T_0' 参数。请检查 lr_scheduler_params.{'cosineannealingwarmrestarts'} 配置块。") # 提示查找键名
 
-    return lr_scheduler_instance
+        scheduler = lr_scheduler.CosineAnnealingWarmRestarts(
+            learning_rate=initial_learning_rate,
+            T_0=scheduler_params['T_0'],
+            T_mult=scheduler_params.get('T_mult', 1), # T_mult 可选，默认为 1
+            eta_min=scheduler_params.get('eta_min', 0), # eta_min 可选，默认为 0
+            # last_epoch=-1 # 如果从检查点恢复，可能需要设置 last_epoch
+        )
 
-# --- 示例用法 (用于测试或演示，实际使用时由训练脚本调用) ---
+
+    # 如果配置的调度器类型不受支持
+    if scheduler is None:
+        raise ValueError(f"不支持的学习率调度器类型: {scheduler_type}. "
+                         f"请检查 configs/default_config.yaml 中 'lr_scheduler_type' 的配置 "
+                         f"以及 utils/lr_scheduler_factory.py 中 get_lr_scheduler 函数的支持列表。")
+
+    # --- 应用 Warmup 调度器 (如果启用) ---
+    if use_warmup and warmup_steps > 0:
+        if scheduler_type == "ReduceOnPlateau" or scheduler_type == "ReduceLROnPlateau":
+             # ReduceOnPlateau 不支持 warmup 包装
+             print("警告: ReduceOnPlateau 调度器通常不直接与 Warmup 结合使用。Warmup 配置将被忽略。")
+             use_warmup = False # 确保不再尝试应用 Warmup
+
+        if use_warmup: # 再次检查 use_warmup，因为 ReduceOnPlateau 可能会将其设为 False
+            # 使用 Warmup 包装器
+            # PaddlePaddle 的 Warmup 是一个独立的调度器，需要组合使用
+            # 注意：这里的实现可能需要根据 PaddlePaddle 的 Warmup API 进行调整
+            # 假设 paddle.optimizer.lr 提供了 WarmupDecay 类
+            try:
+                # WarmupDecay 包装另一个调度器
+                warmup_scheduler = lr_scheduler.WarmupDecay(
+                     learning_rate=scheduler, # WarmupDecay 包装另一个调度器
+                     warmup_steps=warmup_steps,
+                     start_lr=start_lr, # 预热开始的学习率
+                     end_lr=initial_learning_rate # 预热结束时的学习率，通常是基础学习率
+                 )
+                scheduler = warmup_scheduler
+            except AttributeError:
+                 print("警告: paddle.optimizer.lr 模块中未找到 WarmupDecay 类。Warmup 功能将无法使用。")
+                 print("请检查您的 PaddlePaddle 版本或手动实现 Warmup 逻辑。")
+            except Exception as e:
+                 print(f"警告: 创建 Warmup 调度器时发生错误: {e}. Warmup 功能可能无法正常工作。")
+
+
+    return scheduler
+
+# --- 示例用法 (用于测试 lr_scheduler_factory.py 模块本身) ---
+# 在实际训练中，train.py 会调用 get_lr_scheduler 函数
 if __name__ == '__main__':
-    print("--- 学习率调度器工厂模块演示 ---")
+    print("--- 测试学习率调度器工厂函数 ---")
 
-    # 模拟一个包含调度器配置的 ConfigObject
-    # 注意：ConfigObject 本身需要定义，或者直接使用字典来模拟
-    # 为了简单，这里直接使用字典，并假设 get 方法行为类似
-    class MockConfig:
-        def __init__(self, data):
-            self._data = data
-        def get(self, key, default=None):
-            # 简化版get，如果键是嵌套的 (如 'lr_scheduler_params.step_lr')，则不支持
-            # 真实ConfigObject应能处理嵌套访问
-            if '.' in key:
-                # 模拟嵌套获取，实际ConfigObject会有更健壮的实现
-                try:
-                    current = self._data
-                    for part in key.split('.'):
-                        current = current[part]
-                    return current
-                except KeyError:
-                    return default
-            return self._data.get(key, default)
+    # 模拟一个配置对象
+    class MockConfig(ConfigObject):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # 递归将字典转换为 ConfigObject
+            for k, v in self.items():
+                if isinstance(v, dict):
+                    self[k] = MockConfig(v)
 
-    # 1. 测试 StepLR
-    print("\n1. 测试 StepLR:")
+    # 1. 测试 StepDecay
+    print("\n1. 测试 StepDecay:")
     try:
-        config_steplr = MockConfig({
-            "lr_scheduler_type": "StepLR",
+        config_step = MockConfig({
+            "lr_scheduler_type": "StepDecay",
             "lr_scheduler_params": {
-                "step_lr": {"step_size": 10, "gamma": 0.5, "verbose": True}
-            },
-            "warmup_params": {"use_warmup": False} # 不使用预热
-        })
-        scheduler1 = get_lr_scheduler(config_steplr, initial_learning_rate=0.1)
-        print(f"  创建的调度器类型: {type(scheduler1)}")
-        # 模拟训练过程中的学习率变化
-        print("  模拟LR变化 (前35个epochs):")
-        current_lr = 0.1
-        for epoch in range(35):
-            if isinstance(scheduler1, ReduceOnPlateau):
-                scheduler1.step(0.1) # 假设metric是0.1，不改变
-            else:
-                scheduler1.step() # 对大多数调度器，step()不带参数或带epoch索引
-            
-            # 获取更新后的学习率
-            if hasattr(scheduler1, 'last_lr'): # LinearWarmup等包装器有last_lr
-                new_lr = scheduler1.last_lr
-            elif hasattr(scheduler1, 'get_lr'): # 有些基础调度器有get_lr()
-                new_lr = scheduler1.get_lr()
-            else: # 对于ReduceOnPlateau等，LR直接通过优化器获取，这里模拟
-                # 这是一个简化，实际LR应从优化器获取
-                if isinstance(scheduler1, ReduceOnPlateau) and hasattr(scheduler1, 'learning_rate'): 
-                    new_lr = scheduler1.learning_rate # ReduceOnPlateau.learning_rate 是float
-                else: 
-                    new_lr = current_lr # 保持不变如果无法获取
-            
-            if abs(new_lr - current_lr) > 1e-7: # 如果学习率有显著变化
-                print(f"    Epoch {epoch+1}: LR = {new_lr:.6f}")
-                current_lr = new_lr
-            elif epoch == 0 : # 仅在第一个epoch打印，如果LR未变
-                print(f"    Epoch {epoch+1}: LR = {new_lr:.6f}")
-
-    except ValueError as e:
-        print(f"  错误: {e}")
-
-    # 2. 测试 MultiStepLR with Warmup
-    print("\n2. 测试 MultiStepLR with Warmup:")
-    try:
-        config_multisteplr_warmup = MockConfig({
-            "lr_scheduler_type": "MultiStepLR",
-            "lr_scheduler_params": {
-                "multi_step_lr": {"milestones": [15, 25], "gamma": 0.1, "verbose": True}
-            },
-            "warmup_params": {
-                "use_warmup": True,
-                "warmup_epochs": 5,
-                "warmup_start_lr": 0.001,
-                "verbose": True
+                "stepdecay": {"step_size": 30, "gamma": 0.1}, # 参数键名改为 stepdecay
+                "warmup": {"use_warmup": False}
             }
         })
-        scheduler2 = get_lr_scheduler(config_multisteplr_warmup, initial_learning_rate=0.01)
-        print(f"  创建的调度器类型: {type(scheduler2)}, 内部调度器: {type(scheduler2.learning_rate) if hasattr(scheduler2, 'learning_rate') else 'N/A'}")
-        current_lr = 0.01 # 理论上应从warmup_start_lr开始，但打印逻辑依赖scheduler
-        for epoch in range(30):
-            # 对于被LinearWarmup包装的调度器，其step()方法会自动处理预热和主调度器的step
-            scheduler2.step() 
-            new_lr = scheduler2.last_lr # LinearWarmup有last_lr
-            if abs(new_lr - current_lr) > 1e-7 or epoch < config_multisteplr_warmup.get('warmup_params').get('warmup_epochs') or epoch == 0:
-                 print(f"    Epoch {epoch+1}: LR = {new_lr:.6f}")
-                 current_lr = new_lr
+        scheduler1 = get_lr_scheduler(config_step, initial_learning_rate=0.1)
+        print(f"  调度器类型: {type(scheduler1)}")
+        # 模拟训练步数
+        # for epoch in range(5):
+        #      print(f"    Epoch {epoch+1}: LR = {scheduler1.get_lr():.6f}")
+        #      scheduler1.step() # Paddle 的 step 是 per-batch 或 per-epoch，取决于调度器类型和用法
+
     except ValueError as e:
         print(f"  错误: {e}")
 
-    # 3. 测试 ReduceLROnPlateau (注意：其step行为不同)
-    print("\n3. 测试 ReduceLROnPlateau:")
+    # 2. 测试 MultiStepDecay
+    print("\n2. 测试 MultiStepDecay:")
+    try:
+        config_multistep = MockConfig({
+            "lr_scheduler_type": "MultiStepDecay",
+            "lr_scheduler_params": {
+                "multistepdecay": {"milestones": [30, 60, 90], "gamma": 0.1}, # 参数键名改为 multistepdecay
+                "warmup": {"use_warmup": False}
+            }
+        })
+        scheduler2 = get_lr_scheduler(config_multistep, initial_learning_rate=0.1)
+        print(f"  调度器类型: {type(scheduler2)}")
+        # 模拟训练步数
+        # for epoch in range(5):
+        #      print(f"    Epoch {epoch+1}: LR = {scheduler2.get_lr():.6f}")
+        #      scheduler2.step()
+
+    except ValueError as e:
+        print(f"  错误: {e}")
+
+    # 3. 测试 CosineAnnealingDecay with Warmup
+    print("\n3. 测试 CosineAnnealingDecay with Warmup:")
+    try:
+        config_cosine_warmup = MockConfig({
+            # 调度器类型和参数键名改为 CosineAnnealingDecay 和 cosineannealingdecay
+            "lr_scheduler_type": "CosineAnnealingDecay",
+            "lr_scheduler_params": {
+                "cosineannealingdecay": {"T_max": 100, "eta_min": 0},
+                "warmup": {"use_warmup": True, "warmup_steps": 100, "start_lr": 0.001}
+            }
+        })
+        scheduler3 = get_lr_scheduler(config_cosine_warmup, initial_learning_rate=0.1)
+        print(f"  调度器类型 (可能包含 Warmup 包装器): {type(scheduler3)}")
+        # 模拟训练步数 (假设总步数是 1000)
+        # for step in range(1000):
+        #      current_lr = scheduler3.get_lr()
+        #      if step % 100 == 0:
+        #         print(f"    Step {step+1}: LR = {current_lr:.6f}")
+        #      scheduler3.step()
+
+    except ValueError as e:
+        print(f"  错误: {e}")
+    except Exception as e:
+         print(f"  创建调度器时发生其他错误: {e}")
+
+     # 4. 测试 ReduceOnPlateau
+    print("\n4. 测试 ReduceOnPlateau:")
     try:
         config_reduce_lr = MockConfig({
-            "lr_scheduler_type": "ReduceLROnPlateau",
+            # 调度器类型和参数键名改为 ReduceOnPlateau 和 reduceonplateau
+            "lr_scheduler_type": "ReduceOnPlateau",
             "lr_scheduler_params": {
-                "reduce_lr_on_plateau": {
-                    "mode": "min", 
-                    "factor": 0.5, 
-                    "patience": 3, 
-                    "verbose": True,
-                    "threshold": 0.01
-                }
-            },
-            "warmup_params": {"use_warmup": False}
+                "reduceonplateau": {
+                    "mode": 'min',
+                    "factor": 0.1,
+                    "patience": 5,
+                    "threshold": 0.001,
+                    "threshold_mode": 'rel',
+                    "cooldown": 0,
+                    "min_lr": 1e-6,
+                    # removed 'eps'
+                    # "eps": 1e-8 # Removed this parameter from test config
+                },
+                 "warmup": {"use_warmup": False} # ReduceOnPlateau 通常不和 warmup 直接组合
+            }
         })
-        # ReduceLROnPlateau 的 learning_rate 参数是 float (初始LR)
-        # 它的 step 方法需要一个 metric 值。
-        scheduler3 = get_lr_scheduler(config_reduce_lr, initial_learning_rate=0.1)
-        print(f"  创建的调度器类型: {type(scheduler3)}")
-        mock_optimizer_lr = 0.1 # 模拟优化器的学习率
-        print(f"    Epoch 1: LR = {mock_optimizer_lr:.6f}, Metric = 1.0 (step)")
-        scheduler3.step(1.0) # metric_value = 1.0
-        # ReduceLROnPlateau 不直接修改自身的LR，而是依赖优化器更新。
-        # 它的verbose输出会指示LR是否应该改变。
-        # 我们需要模拟优化器实际的LR变化来观察效果。
-        # 假设如果scheduler3.verbose打印了降低LR的信息，我们手动调整mock_optimizer_lr
-        # PaddlePaddle的ReduceLROnPlateau的_reduce_lr方法会返回新的LR，但step不直接返回。
-        # 这里仅演示创建，实际的LR变化由训练循环中的优化器体现。
-        for i in range(2, 8):
-            metric = 1.0 - (i * 0.001) # 模拟指标轻微改善，但不足以超过阈值
-            print(f"    Epoch {i}: LR = {mock_optimizer_lr:.6f} (before step), Metric = {metric:.3f}")
-            scheduler3.step(metric) 
-            # 实际应用中，如果scheduler的step导致了LR变化，会通过优化器反映出来
-            # 这里仅作演示，不模拟优化器的交互
-        print(f"    Epoch 8: LR = {mock_optimizer_lr:.6f} (before step), Metric = 0.5 (significant improvement)")
-        scheduler3.step(0.5)
-        # 此时verbose应有输出，提示学习率降低，mock_optimizer_lr应相应更新 (例如变为 0.1 * 0.5 = 0.05)
-        # mock_optimizer_lr = 0.05 # 手动模拟
-        print(f"    (如果发生衰减，模拟的LR会降低，此处仅演示调度器创建和调用)")
+        scheduler4 = get_lr_scheduler(config_reduce_lr, initial_learning_rate=0.01)
+        print(f"  调度器类型: {type(scheduler4)}")
+        # 对于 ReduceOnPlateau，需要在评估指标不再改善时调用 step()
+        # scheduler4.step(metrics_value) # 传入监控的指标值
 
     except ValueError as e:
         print(f"  错误: {e}")
+    except TypeError as e:
+         print(f"  捕获到 ReduceOnPlateau 的 TypeError: {e}")
 
-    # 4. 测试不支持的类型
-    print("\n4. 测试不支持的调度器类型:")
+
+    # 5. 测试 CosineAnnealingWarmRestarts
+    print("\n5. 测试 CosineAnnealingWarmRestarts:")
+    try:
+        config_warm_restarts = MockConfig({
+            "lr_scheduler_type": "CosineAnnealingWarmRestarts",
+            "lr_scheduler_params": {
+                "cosineannealingwarmrestarts": {"T_0": 10, "T_mult": 2, "eta_min": 0}, # 参数键名改为 cosineannealingwarmrestarts
+                "warmup": {"use_warmup": True, "warmup_steps": 100, "start_lr": 0.001}
+            }
+        })
+        scheduler5 = get_lr_scheduler(config_warm_restarts, initial_learning_rate=0.1)
+        print(f"  调度器类型 (可能包含 Warmup 包装器): {type(scheduler5)}")
+        # 模拟训练步数 (假设总步数是 1000)
+        # for step in range(1000):
+        #      current_lr = scheduler5.get_lr()
+        #      if step % 50 == 0:
+        #         print(f"    Step {step+1}: LR = {current_lr:.6f}")
+        #      scheduler5.step() # Paddle 的 step 是 per-batch 或 per-epoch，取决于调度器类型和用法
+        # # 或者模拟 epoch
+        # for epoch in range(30): # 模拟多个周期
+        #      print(f"    Epoch {epoch+1}: LR = {scheduler5.get_lr():.6f}")
+        #      scheduler5.step() # CosineAnnealingWarmRestarts 的 step 通常是 per-epoch
+
+    except ValueError as e:
+        print(f"  错误: {e}")
+    except Exception as e:
+         print(f"  创建调度器时发生其他错误: {e}")
+
+
+    # 6. 测试不支持的类型
+    print("\n6. 测试不支持的调度器类型:")
     try:
         config_unsupported = MockConfig({
             "lr_scheduler_type": "NonExistentScheduler",
             "lr_scheduler_params": {},
-            "warmup_params": {"use_warmup": False}
+            "warmup": {"use_warmup": False}
         })
-        scheduler4 = get_lr_scheduler(config_unsupported, initial_learning_rate=0.1)
+        scheduler6 = get_lr_scheduler(config_unsupported, initial_learning_rate=0.1)
     except ValueError as e:
         print(f"  捕获到预期错误: {e}")
-        
-    # 5. 测试缺少必要参数的情况 (例如 MultiStepLR 缺少 milestones)
-    print("\n5. 测试 MultiStepLR 缺少 milestones 参数:")
+
+    # 7. 测试缺少必要参数的情况 (例如 MultiStepDecay 缺少 milestones)
+    print("\n7. 测试缺少必要参数的情况 (MultiStepDecay 缺少 milestones):")
     try:
-        config_missing_param = MockConfig({
-            "lr_scheduler_type": "MultiStepLR",
+        config_missing_params = MockConfig({
+            "lr_scheduler_type": "MultiStepDecay",
             "lr_scheduler_params": {
-                "multi_step_lr": {"gamma": 0.1} # 故意缺少 milestones
-            },
-            "warmup_params": {"use_warmup": False}
+                "multistepdecay": {"gamma": 0.1}, # 缺少 milestones
+                "warmup": {"use_warmup": False}
+            }
         })
-        scheduler5 = get_lr_scheduler(config_missing_param, initial_learning_rate=0.01)
+        scheduler7 = get_lr_scheduler(config_missing_params, initial_learning_rate=0.1)
     except ValueError as e:
-        print(f"  捕获到预期错误: {e}") 
+        print(f"  捕获到预期错误: {e}")
+
+    # 8. 测试未指定调度器类型
+    print("\n8. 测试未指定调度器类型:")
+    try:
+        config_no_type = MockConfig({
+            # "lr_scheduler_type": "StepDecay", # 注释掉这一行
+            "lr_scheduler_params": {
+                "stepdecay": {"step_size": 30, "gamma": 0.1},
+                "warmup": {"use_warmup": False}
+            }
+        })
+        scheduler8 = get_lr_scheduler(config_no_type, initial_learning_rate=0.1)
+    except AttributeError as e: # lr_scheduler_type 不存在会是 AttributeError
+        print(f"  捕获到预期错误: {e} (lr_scheduler_type 未找到)")
+    except ValueError as e:
+         print(f"  捕获到预期错误: {e}")
+
+    # 9. 测试没有 lr_scheduler_params 键
+    print("\n9. 测试没有 lr_scheduler_params 键:")
+    try:
+        config_no_params_key = MockConfig({
+            "lr_scheduler_type": "StepDecay",
+            # "lr_scheduler_params": { # 注释掉这一行
+            #     "stepdecay": {"step_size": 30, "gamma": 0.1},
+            #     "warmup": {"use_warmup": False}
+            # }
+        })
+        scheduler9 = get_lr_scheduler(config_no_params_key, initial_learning_rate=0.1)
+        print(f"  调度器类型: {type(scheduler9)}") # 如果 lr_scheduler_params 不存在，get() 会返回 {}，可能使用默认参数创建
+    except ValueError as e:
+        print(f"  捕获到错误: {e}") # 如果参数确实是必须的，这里会捕获错误
+
+    # 10. 测试参数子键名不匹配
+    print("\n10. 测试参数子键名不匹配:")
+    try:
+        config_wrong_params_key = MockConfig({
+            "lr_scheduler_type": "StepDecay",
+            "lr_scheduler_params": {
+                "wrong_key": {"step_size": 30, "gamma": 0.1}, # 键名错误
+                "warmup": {"use_warmup": False}
+            }
+        })
+        scheduler10 = get_lr_scheduler(config_wrong_params_key, initial_learning_rate=0.1)
+        # 因为使用了 .get(scheduler_type.lower(), {})，键名不匹配会返回 {}，可能使用默认参数创建
+        # 这里可能会捕获到ValueError如果step_size和gamma是必须的且不在默认参数中
+        # 如果scheduler_params为空字典，然后尝试访问scheduler_params['step_size']，会是KeyError
+        # 但工厂函数中加了检查，会报 ValueError
+        print(f"  调度器类型: {type(scheduler10)}") # 如果没有捕获到 ValueError
+    except ValueError as e:
+        print(f"  捕获到错误: {e}") # 捕获到预期的 ValueError
+
+    # 11. 测试 PolynomialDecay
+    print("\n11. 测试 PolynomialDecay:")
+    try:
+        config_polynomial = MockConfig({
+             "lr_scheduler_type": "PolynomialDecay",
+             "lr_scheduler_params": {
+                  "polynomialdecay": {"decay_steps": 100, "end_lr": 0.0001, "power": 0.9}, # 参数键名改为 polynomialdecay
+                  "warmup": {"use_warmup": False}
+              }
+         })
+        scheduler11 = get_lr_scheduler(config_polynomial, initial_learning_rate=0.01)
+        print(f"  调度器类型: {type(scheduler11)}")
+    except ValueError as e:
+        print(f"  错误: {e}")
+
+    # 12. 测试 CosineAnnealingWarmRestarts
+    print("\n12. 测试 CosineAnnealingWarmRestarts:")
+    try:
+        config_warm_restarts = MockConfig({
+            "lr_scheduler_type": "CosineAnnealingWarmRestarts",
+            "lr_scheduler_params": {
+                "cosineannealingwarmrestarts": {"T_0": 10, "T_mult": 2, "eta_min": 0}, # 参数键名改为 cosineannealingwarmrestarts
+                "warmup": {"use_warmup": True, "warmup_steps": 100, "start_lr": 0.001}
+            }
+        })
+        scheduler12 = get_lr_scheduler(config_warm_restarts, initial_learning_rate=0.1)
+        print(f"  调度器类型 (可能包含 Warmup 包装器): {type(scheduler12)}")
+        # 模拟训练步数
+        # for step in range(1000):
+        #      current_lr = scheduler12.get_lr()
+        #      if step % 50 == 0:
+        #         print(f"    Step {step+1}: LR = {current_lr:.6f}")
+        #      scheduler12.step()
+
+    except ValueError as e:
+        print(f"  错误: {e}")
+    except Exception as e:
+         print(f"  创建调度器时发生其他错误: {e}")

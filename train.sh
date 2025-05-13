@@ -9,10 +9,26 @@ LOG_DIR="${PROJECT_DIR}/logs_local_train" # 日志文件保存目录
 
 # 需要在本地 GPU 训练的配置块名称列表
 CONFIG_NAMES_TO_TRAIN=(
-    "vgg_ce_config"
-    "vgg_arcface_config"
-    "resnet_ce_config"
-    "resnet_arcface_config"
+    "vgg_ce_steplr_config"
+    "vgg_ce_multistep_config"
+    "vgg_ce_cosine_config"
+    "vgg_ce_reduce_lr_config"
+    "vgg_ce_warm_restarts_config"
+    "vgg_arcface_steplr_config"
+    "vgg_arcface_multistep_config"
+    "vgg_arcface_cosine_config"
+    "vgg_arcface_reduce_lr_config"
+    "vgg_arcface_warm_restarts_config"
+    "resnet_ce_steplr_config"
+    "resnet_ce_multistep_config"
+    "resnet_ce_cosine_config"
+    "resnet_ce_reduce_lr_config"
+    "resnet_ce_warm_restarts_config"
+    "resnet_arcface_steplr_config"
+    "resnet_arcface_multistep_config"
+    "resnet_arcface_cosine_config"
+    "resnet_arcface_reduce_lr_config"
+    "resnet_arcface_warm_restarts_config"
 )
 
 # --- 脚本开始 ---
@@ -71,7 +87,7 @@ for config_name in "${CONFIG_NAMES_TO_TRAIN[@]}"; do
     echo "训练日志将保存到: ${LOG_FILE_TRAIN}"
 
     # 构建 train.py 命令
-    TRAIN_CMD="python train.py --config_path "${CONFIG_FILE}" --active_config "${config_name}" --use_gpu --resume --source manual"
+    TRAIN_CMD="python train.py --config_path "${CONFIG_FILE}" --active_config "${config_name}" --use_gpu --resume --source manual --class_name face" # <--- 在这里添加 --class_name face
 
     echo "执行命令: ${TRAIN_CMD}"
     # 使用 eval 执行命令，并将标准输出和错误都重定向到日志文件
