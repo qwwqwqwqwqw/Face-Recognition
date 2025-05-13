@@ -161,66 +161,66 @@
 
 ## 项目架构与技术栈
 
-### 模块依赖图 (概念)
+### 模块依赖图（概念）
 
 ```mermaid
 graph TD;
-    subgraph "数据处理模块"
-        A[原始图像数据] --> B(CreateDataList.py);
-        B -- "生成" --> C[数据列表\n(trainer.list, test.list, readme.json)];
-        C --> D(MyReader.py);
+    subgraph 数据处理模块
+        A[原始图像数据] --> B[CreateDataList.py];
+        B --> C[数据列表：trainer.list / test.list / readme.json];
+        C --> D[MyReader.py];
     end
 
-    subgraph "配置管理模块"
-        E[YAML配置\n(configs/default_config.yaml)] --> F(config_utils.py);
+    subgraph 配置管理模块
+        E[配置文件：configs/default_config.yaml] --> F[config_utils.py];
         G[命令行参数] --> F;
     end
 
-    subgraph "模型定义模块"
-        H(models/vgg_backbone.py) --> I(model_factory.py);
-        J(models/resnet_backbone.py) --> I;
-        K(heads.py) --> I;
+    subgraph 模型定义模块
+        H[models/vgg_backbone.py] --> I[model_factory.py];
+        J[models/resnet_backbone.py] --> I;
+        K[heads.py] --> I;
     end
 
-    subgraph "核心流程执行模块"
-        L(train.py) -- "使用数据加载器" --> D;
-        L -- "加载配置" --> F;
-        L -- "构建模型经由" --> I;
-        L -- "使用学习率调度器" --> M(utils/lr_scheduler_factory.py);
-        L -- "保存训练结果" --> N[训练模型/检查点\n(model/)];
+    subgraph 核心流程执行模块
+        L[train.py] --> D;
+        L --> F;
+        L --> I;
+        L --> M[utils/lr_scheduler_factory.py];
+        L --> N[模型检查点输出目录：model];
 
-        O(create_face_library.py) -- "加载模型" --> N;
-        O -- "读取数据列表" --> C;
-        O -- "加载配置" --> F;
-        O -- "构建骨干网络经由" --> I;
-        O -- "生成并保存" --> P[人脸特征库\n(.pkl)];
+        O[create_face_library.py] --> N;
+        O --> C;
+        O --> F;
+        O --> I;
+        O --> P[人脸特征库文件：face_features.pkl];
 
-        Q(infer.py) -- "加载模型" --> N;
-        Q -- "使用特征库\n(限ArcFace模型)" --> P;
-        Q -- "加载配置" --> F;
-        Q -- "构建模型经由" --> I;
+        Q[infer.py] --> N;
+        Q --> P;
+        Q --> F;
+        Q --> I;
 
-        R(compare.py) -- "加载模型" --> N;
-        R -- "加载配置" --> F;
-        R -- "构建骨干网络经由" --> I;
+        R[compare.py] --> N;
+        R --> F;
+        R --> I;
     end
 
-    subgraph "对抗学习模块 (规划中)"
-        Attacks(attacks/gradient_attacks.py)
-        Attacks -- "用于对抗训练" --> L;
-        Attacks -- "用于鲁棒性评估" --> Q;
+    subgraph 对抗学习模块（规划中）
+        Attacks[attacks/gradient_attacks.py]
+        Attacks --> L;
+        Attacks --> Q;
     end
 
-    subgraph "用户交互与结果输出模块"
-        G -- "影响执行" --> L;
-        G -- "影响执行" --> O;
-        G -- "影响执行" --> Q;
-        G -- "影响执行" --> R;
+    subgraph 用户交互与结果输出模块
+        G --> L;
+        G --> O;
+        G --> Q;
+        G --> R;
 
-        Q -- "输出识别结果到" --> S[识别结果\n(results/)];
-        R -- "输出对比结果到" --> T[对比结果\n(results/)];
+        Q --> S[识别结果输出目录：results/];
+        R --> T[对比结果输出目录：results/];
 
-        WebApp([交互式Web UI (规划中)])
+        WebApp[交互式 Web UI（规划中）]
         WebApp -.-> L;
         WebApp -.-> Q;
         WebApp -.-> R;
@@ -233,8 +233,8 @@ graph TD;
 
 ### 核心技术栈
 
-*   **核心框架**: PaddlePaddle (本项目基于 `paddlepaddle-gpu==3.0.0` 测试)
-*   **编程语言**: Python (3.8+)
+*   **核心框架**: 本项目基于 PaddlePaddle 深度学习框架开发，并在 paddlepaddle-gpu==3.0.0 环境下测试通过。
+*   **编程语言**: Python 3.8 及以上版本。
 *   **主要依赖**:
     *   `PyYAML`: 用于解析YAML配置文件。
     *   `opencv-python`: 用于图像读取和预处理。
