@@ -25,6 +25,22 @@ import MyReader                 # 导入数据读取和预处理模块
 from config_utils import load_config, ConfigObject # 导入配置加载工具和配置对象类型
 from model_factory import get_backbone, get_head   # 导入模型构建工厂函数
 from utils.lr_scheduler_factory import get_lr_scheduler # 导入学习率调度器工厂函数
+import time # 用于计时
+import json # 用于保存元数据
+import subprocess # 用于获取 git hash
+
+def get_git_revision_hash() -> str:
+    """获取当前 Git仓库的 HEAD commit hash (短格式)"""
+    try:
+        # 确保在项目根目录运行 git 命令
+        project_root = os.path.dirname(os.path.abspath(__file__)) # 或者从配置获取
+        result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
+                                cwd=project_root, # 在项目根目录执行
+                                capture_output=True, text=True, check=True)
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"警告: 获取 Git commit hash 失败: {e}")
+        return "unknown"
 
 def train(config: ConfigObject, cmd_args: argparse.Namespace):
     """模型训练的主函数。
@@ -118,25 +134,27 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
         os.makedirs(config.model_save_dir)
         print(f"创建模型保存目录: {config.model_save_dir}")
 
-    # 检查点和最佳模型的文件名格式包含模型类型和损失类型，以区分不同配置的产物。
-    # filename_suffix = f"{model_type_str}_{loss_type_str}" # 更通用的后缀
-    # # 对于VGG，历史上可能只用 'ce' 作为损失后缀，除非明确用了arcface
-    # if model_type_str == 'vgg' and loss_type_str != 'arcface':
-    #     filename_suffix = f"{model_type_str}_ce"
-    # elif model_type_str == 'vgg' and loss_type_str == 'arcface':
-    #     filename_suffix = f"{model_type_str}_arcface" # 明确的VGG+ArcFace
-    # # 对于ResNet，通常会带上损失类型
+    # 获取训练来源标识 (来自命令行参数)
+    train_source = cmd_args.source if hasattr(cmd_args, 'source') else 'manual' # 默认为 manual
+    print(f"训练来源: {train_source}")
 
-    # 统一使用 model_type 和 loss_type 组合作为文件名后缀
-    filename_suffix = f"{config.model_type}_{config.loss_type}"
+    # 构建包含模型类型、损失类型、硬件和来源的文件名基础部分
+    filename_base = f"{config.model_type}_{config.loss_type}_{'gpu' if paddle.is_compiled_with_cuda() else 'cpu'}_{train_source}"
 
-    checkpoint_filename = f"checkpoint_{filename_suffix}.pdparams"
+    checkpoint_filename = f"checkpoint_{filename_base}.pdparams"
     checkpoint_path = os.path.join(config.model_save_dir, checkpoint_filename)
     
-    best_model_filename = f"best_model_{filename_suffix}.pdparams"
+    best_model_filename = f"best_model_{filename_base}.pdparams"
     best_model_path = os.path.join(config.model_save_dir, best_model_filename)
-    print(f"训练检查点将保存至: {checkpoint_path}")
-    print(f"最佳模型将保存至: {best_model_path}")
+    
+    # 元数据文件名与模型文件名对应
+    checkpoint_meta_filename = f"checkpoint_{filename_base}.json"
+    checkpoint_meta_path = os.path.join(config.model_save_dir, checkpoint_meta_filename)
+    best_model_meta_filename = f"best_model_{filename_base}.json"
+    best_model_meta_path = os.path.join(config.model_save_dir, best_model_meta_filename)
+    
+    print(f"训练检查点将保存至: {checkpoint_path} (元数据: {checkpoint_meta_path})")
+    print(f"最佳模型将保存至: {best_model_path} (元数据: {best_model_meta_path})")
     # ---------------------------------------------------------
     
     # --- 定义学习率调度器 (Learning Rate Scheduler) ---
@@ -295,9 +313,15 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
             start_epoch = 0; best_acc = 0.0; global_step = 0
     # -----------------------------------------------------------------
 
+    # 获取 Git Hash
+    current_git_hash = get_git_revision_hash()
+    print(f"当前 Git Commit Hash: {current_git_hash}")
+
     print(f"开始训练，总共 {config.epochs} 个 epochs... 从 epoch {start_epoch} 开始")
     # --- 主训练循环 (Outer loop for epochs) ---
+    start_train_time = time.time() # 记录训练开始时间
     for epoch_idx in range(start_epoch, config.epochs):
+        epoch_start_time = time.time()
         # 设置模型为训练模式 (启用dropout, batchnorm更新等)
         if backbone_instance: backbone_instance.train()
         if head_module_instance: head_module_instance.train()
@@ -412,16 +436,17 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
                 print(f"警告: ReduceOnPlateau 配置了未知的 metric_name: '{plateau_metric_to_monitor}'。将使用验证损失进行 step。")
                 lr_scheduler.step(avg_eval_loss)
         
-        # --- 保存检查点 (Checkpointing) ---
-        # 将当前训练配置转换为字典以便保存。这有助于后续恢复或分析。
+        # --- 保存检查点和元数据 ---
         current_config_dict_to_save = config.to_dict() 
         
-        # # (可选) 准备更详细的骨干网络参数用于保存，如果工厂函数有修改或添加默认值。
-        # # 这里假设config对象中的backbone_specific_params已经是最终生效的参数。
-        # current_config_dict_to_save['backbone_params_used'] = backbone_specific_params
-        # current_config_dict_to_save['head_params_used'] = head_specific_params
+        # 准备模型状态字典
+        model_state_to_save = {}
+        if backbone_instance: model_state_to_save['backbone'] = backbone_instance.state_dict()
+        if head_module_instance: model_state_to_save['head'] = head_module_instance.state_dict()
 
+        # 准备检查点内容 (包含模型状态、优化器、调度器、训练进度)
         checkpoint_content_to_save = {
+            **model_state_to_save, # 模型权重
             'optimizer': opt.state_dict(), 
             'lr_scheduler': lr_scheduler.state_dict(),
             'epoch': epoch_idx, 
@@ -429,27 +454,70 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
             'global_step': global_step,
             'config': current_config_dict_to_save # 保存当前训练的完整配置
         }
-        if backbone_instance: checkpoint_content_to_save['backbone'] = backbone_instance.state_dict()
-        if head_module_instance: checkpoint_content_to_save['head'] = head_module_instance.state_dict()
-            
         paddle.save(checkpoint_content_to_save, checkpoint_path)
-        print(f"检查点已保存到: {checkpoint_path}")
         
-        # --- 保存最佳模型 (Save best model based on validation accuracy) ---
+        # 保存检查点元数据
+        checkpoint_metadata = {
+            "saved_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "epoch": epoch_idx + 1, # 保存的是完成的epoch数 (1-based)
+            "global_step": global_step,
+            "current_eval_accuracy": float(f"{current_eval_acc:.6f}"), # 保存当前周期的验证精度
+            "best_eval_accuracy_so_far": float(f"{best_acc:.6f}"),
+            "current_eval_loss": float(f"{avg_eval_loss:.6f}") if avg_eval_loss != float('inf') else None,
+            "learning_rate": float(f"{opt.get_lr():.8f}"),
+            "hardware": 'gpu' if paddle.is_compiled_with_cuda() else 'cpu',
+            "source": train_source,
+            "git_hash": current_git_hash,
+            "config_snapshot": current_config_dict_to_save # 包含完整的配置快照
+        }
+        try:
+            with open(checkpoint_meta_path, 'w', encoding='utf-8') as f_meta:
+                json.dump(checkpoint_metadata, f_meta, indent=4, ensure_ascii=False)
+            print(f"检查点及元数据已保存到: {checkpoint_path}, {checkpoint_meta_path}")
+        except Exception as e:
+             print(f"警告: 保存检查点元数据到 {checkpoint_meta_path} 失败: {e}")
+        
+        # --- 保存最佳模型和元数据 (如果当前模型更好) ---
         if current_eval_acc > best_acc:
+            previous_best_acc = best_acc
             best_acc = current_eval_acc
-            # 最佳模型文件也应包含配置信息，以及骨干和头部的权重。
-            best_model_content_to_save = {'config': current_config_dict_to_save} 
-            if backbone_instance: best_model_content_to_save['backbone'] = backbone_instance.state_dict()
-            if head_module_instance: best_model_content_to_save['head'] = head_module_instance.state_dict()
             
+            # 最佳模型文件只包含模型权重和配置快照
+            best_model_content_to_save = {
+                 **model_state_to_save, # 模型权重
+                'config': current_config_dict_to_save 
+            }
             paddle.save(best_model_content_to_save, best_model_path)
-            print(f"最佳模型已更新并保存到: {best_model_path} (Epoch {epoch_idx + 1}, Test Accuracy: {best_acc:.4f})")
+            
+            # 保存最佳模型元数据
+            best_model_metadata = {
+                "saved_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "achieved_at_epoch": epoch_idx + 1,
+                "achieved_at_global_step": global_step,
+                "best_eval_accuracy": float(f"{best_acc:.6f}"),
+                 "eval_loss_at_best_acc": float(f"{avg_eval_loss:.6f}") if avg_eval_loss != float('inf') else None,
+                "hardware": 'gpu' if paddle.is_compiled_with_cuda() else 'cpu',
+                "source": train_source,
+                "git_hash": current_git_hash,
+                "training_duration_seconds": int(time.time() - start_train_time), # 总训练时长
+                "config_snapshot": current_config_dict_to_save
+            }
+            try:
+                with open(best_model_meta_path, 'w', encoding='utf-8') as f_meta:
+                    json.dump(best_model_metadata, f_meta, indent=4, ensure_ascii=False)
+                print(f"最佳模型已更新并保存到: {best_model_path}, {best_model_meta_path} (Epoch {epoch_idx + 1}, Test Acc: {previous_best_acc:.4f} -> {best_acc:.4f})")
+            except Exception as e:
+                 print(f"警告: 保存最佳模型元数据到 {best_model_meta_path} 失败: {e}")
+                 
+        epoch_duration = time.time() - epoch_start_time
+        print(f"Epoch {epoch_idx + 1} 耗时: {epoch_duration:.2f} 秒")
+
     # --- 所有Epoch训练结束 ---
-    
-    print(f"训练完成。在测试集上的最佳准确率: {best_acc:.4f}")
-    print(f"最终模型检查点位于: {checkpoint_path}")
-    print(f"性能最佳的模型位于: {best_model_path}")
+    total_training_time = time.time() - start_train_time
+    print(f"\n训练完成。总耗时: {total_training_time:.2f} 秒")
+    print(f"在测试集上的最佳准确率: {best_acc:.4f}")
+    print(f"最终模型检查点位于: {checkpoint_path} (元数据: {checkpoint_meta_path})")
+    print(f"性能最佳的模型位于: {best_model_path} (元数据: {best_model_meta_path})")
 
 if __name__ == '__main__':
     # --- 命令行参数解析 --- 
@@ -467,6 +535,8 @@ if __name__ == '__main__':
                              '例如: --resume (设为True), --no-resume (设为False)。如果未指定，则遵循配置文件。')
     parser.add_argument('--active_config', type=str, default=None,
                         help='通过命令行指定要激活的配置块名称，覆盖YAML文件中的active_config设置。')
+    parser.add_argument('--num_classes', type=int, default=None, help='覆盖配置文件中的类别数。')
+    parser.add_argument('--source', type=str, choices=['manual', 'auto'], default='manual', help='标记训练来源 (手动或自动)。')
 
     # --- 其他可覆盖配置文件的参数 ---
     # 以下参数如果用户在命令行中指定了，其值将覆盖从YAML配置文件中加载的同名参数。
@@ -481,7 +551,6 @@ if __name__ == '__main__':
     # 模型结构相关 (通常由YAML中 active_config 指向的配置块定义)
     parser.add_argument('--model_type', type=str, choices=['vgg', 'resnet'], help='选择骨干网络类型 (覆盖配置文件中的 model_type)')
     parser.add_argument('--loss_type', type=str, choices=['cross_entropy', 'arcface'], help='选择损失函数/头部类型 (覆盖配置文件中的 loss_type)')
-    parser.add_argument('--num_classes', type=int, help='数据集中的类别总数 (覆盖配置文件中的 num_classes)')
     parser.add_argument('--image_size', type=int, help='输入图像预处理后的统一尺寸 (覆盖配置文件中的 image_size)')
     
     # 训练超参数 (通常由YAML中 active_config 指向的配置块定义)
@@ -513,6 +582,7 @@ if __name__ == '__main__':
     
     # 打印最终生效的关键配置信息，方便用户确认
     print("\n--- 最终生效的训练配置 (YAML与命令行合并后) ---")
+    print(f"  活动配置块 (_active_config_name): {final_config._active_config_name if hasattr(final_config, '_active_config_name') else '未指定'}")
     print(f"  模型类型 (model_type): {final_config.model_type}")
     print(f"  损失/头部类型 (loss_type): {final_config.loss_type}")
     print(f"  GPU 使用 (use_gpu): {final_config.use_gpu}")
@@ -523,6 +593,7 @@ if __name__ == '__main__':
     print(f"  类别数 (num_classes): {final_config.num_classes}")
     print(f"  图像尺寸 (image_size): {final_config.image_size}")
     print(f"  随机种子 (seed): {final_config.seed}")
+    print(f"  训练来源 (source): {cmd_line_args.source}") # 明确打印来源
     
     if final_config.model_type == 'resnet':
         resnet_p = final_config.model.get('resnet_params', {})
@@ -534,6 +605,10 @@ if __name__ == '__main__':
         vgg_p = final_config.model.get('vgg_params', {})
         print(f"  VGG参数: dropout_rate={vgg_p.get('dropout_rate')}")
     print("---------------------------------------------------\n")
+
+    # 检查 num_classes 是否最终确定
+    if final_config.get('num_classes') is None:
+         parser.error("错误: 最终配置中未能确定 'num_classes'。请检查YAML文件和命令行参数 --num_classes。")
 
     # 调用训练函数，开始训练
     train(final_config, cmd_line_args) 

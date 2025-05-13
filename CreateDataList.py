@@ -15,6 +15,8 @@ CreateDataList.py
 """
 import os
 import json
+import random
+import argparse # 导入 argparse
 
 class CreateDataList:
     """
@@ -36,7 +38,9 @@ class CreateDataList:
     def create_data_list(self, data_root_path: str, 
                          train_list_name: str = "trainer.list", 
                          test_list_name: str = "test.list", 
-                         meta_file_name: str = "readme.json") -> None:
+                         meta_file_name: str = "readme.json",
+                         train_ratio: float = 0.8,
+                         output_num_classes_file: str = None) -> None:
         """
         遍历指定的数据集根目录，为其中的图像生成训练列表、测试列表和元数据JSON文件。
 
@@ -64,6 +68,9 @@ class CreateDataList:
                                             默认为 "test.list"。
             meta_file_name (str, optional): 生成的元数据JSON文件名。
                                             默认为 "readme.json"。
+            train_ratio (float, optional): 训练集所占的比例 (0 到 1 之间)。
+            output_num_classes_file (str, optional): 将计算出的类别数写入的文件路径。
+                                                    如果为 None，则不写入文件。
 
         Returns:
             None: 该方法直接将生成的文件写入磁盘，不返回任何值。
@@ -226,6 +233,60 @@ class CreateDataList:
         print(f"\n数据列表和元数据创建完成！")
         print(f"总共处理了 {total_images_count} 张图片，这些图片分属于 {len(class_details)} 个类别。")
 
+        # 随机打乱列表
+        all_file_paths = [f"{relative_image_path}\t{current_class_label}" for relative_image_path in [os.path.join(class_dir_name, image_file_name) for image_file_name in image_files_in_class_sorted]]
+        random.shuffle(all_file_paths)
+
+        # 划分训练集和评估集
+        split_index = int(len(all_file_paths) * train_ratio)
+        train_list = all_file_paths[:split_index]
+        eval_list = all_file_paths[split_index:]
+
+        print(f"\n总共找到 {len(all_file_paths)} 个有效图片文件。")
+        print(f"划分为: {len(train_list)} 个训练样本, {len(eval_list)} 个评估样本 (比例 ≈ {train_ratio:.2f})")
+
+        # 确保输出目录存在
+        if not os.path.exists(data_root_path):
+            os.makedirs(data_root_path)
+            print(f"创建输出目录: {data_root_path}")
+
+        # 保存训练列表
+        train_list_path = os.path.join(data_root_path, train_list_name)
+        try:
+            with open(train_list_path, 'w', encoding='utf-8') as f:
+                for line in train_list:
+                    f.write(line + '\n')
+            print(f"训练列表已保存到: {train_list_path}")
+        except IOError as e:
+            print(f"错误: 无法写入训练列表文件 {train_list_path}: {e}")
+
+        # 保存评估列表
+        eval_list_path = os.path.join(data_root_path, test_list_name)
+        try:
+            with open(eval_list_path, 'w', encoding='utf-8') as f:
+                for line in eval_list:
+                    f.write(line + '\n')
+            print(f"评估列表已保存到: {eval_list_path}")
+        except IOError as e:
+            print(f"错误: 无法写入评估列表文件 {eval_list_path}: {e}")
+
+        # 将类别数写入文件 (如果指定了路径)
+        if output_num_classes_file:
+            try:
+                # 确保目录存在
+                num_classes_output_dir = os.path.dirname(output_num_classes_file)
+                if num_classes_output_dir and not os.path.exists(num_classes_output_dir):
+                    os.makedirs(num_classes_output_dir)
+                    print(f"为类别数文件创建目录: {num_classes_output_dir}")
+                    
+                with open(output_num_classes_file, 'w', encoding='utf-8') as f:
+                    f.write(str(len(class_details)))
+                print(f"类别数 ({len(class_details)}) 已写入: {output_num_classes_file}")
+            except IOError as e:
+                print(f"错误: 无法写入类别数文件 {output_num_classes_file}: {e}")
+
+        print("\n数据列表生成完毕。")
+
 # --- 脚本主入口 ---
 if __name__ == '__main__':
     """
@@ -260,6 +321,32 @@ if __name__ == '__main__':
     #     test_list_name=custom_test_list_filename,
     #     meta_file_name=custom_meta_filename
     # )
-    data_lister_instance.create_data_list(target_dataset_root)
+    parser = argparse.ArgumentParser(description="生成 PaddlePaddle 模型训练所需的数据列表文件。")
+    parser.add_argument('--data_root', type=str, required=True,
+                        help='数据集根目录路径。此目录下应包含代表不同类别的子目录，子目录中包含图片文件。')
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='生成的 train_list.txt 和 eval_list.txt 文件的输出目录。'
+                             '如果未指定，则默认使用 data_root 目录。')
+    parser.add_argument('--train_ratio', type=float, default=0.8,
+                        help='训练集所占的比例 (0 到 1 之间)，剩余部分为评估集。默认为 0.8。')
+    parser.add_argument('--output_num_classes_file', type=str, default=None,
+                        help='可选参数。指定一个文件路径，用于写入计算出的类别总数。'
+                             '例如: /path/to/project/latest_num_classes.txt')
+
+    args = parser.parse_args()
+
+    # 如果未指定输出目录，则默认为 data_root
+    if args.output_dir is None:
+        args.output_dir = args.data_root
+
+    # 执行列表创建
+    data_lister_instance.create_data_list(
+        data_root_path=args.data_root,
+        train_list_name="train_list.txt",
+        test_list_name="eval_list.txt",
+        meta_file_name="readme.json",
+        train_ratio=args.train_ratio,
+        output_num_classes_file=args.output_num_classes_file
+    )
     
-    print("\n脚本执行完毕。请检查在数据集根目录下生成的列表文件 (trainer.list, test.list) 和元数据文件 (readme.json)。") 
+    print("\n脚本执行完毕。请检查在数据集根目录下生成的列表文件 (train_list.txt, eval_list.txt) 和元数据文件 (readme.json)。") 

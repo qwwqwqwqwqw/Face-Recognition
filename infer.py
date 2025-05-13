@@ -34,6 +34,7 @@ import matplotlib.pyplot as plt
 import pickle # 用于加载ArcFace模型所需的人脸特征库 (.pkl文件)
 from config_utils import load_config, ConfigObject # 导入配置加载工具和配置对象类型
 from model_factory import get_backbone, get_head # 导入模型构建的工厂函数
+from heads import create_head # 导入头部模块构建函数
 
 def process_image_local(img_path: str, target_size: int = 64, 
                         mean_rgb: list[float] = [0.485, 0.456, 0.406], 
@@ -492,6 +493,8 @@ def infer(config: ConfigObject):
     else:
         print("可视化输出未启用 (infer_visualize 未设置为 true 或配置中缺失)。")
 
+    return input_image_features_tensor.numpy() # 返回特征向量
+
 if __name__ == '__main__':
     # --- 命令行参数解析 --- 
     parser = argparse.ArgumentParser(description='人脸识别单图推理脚本')
@@ -544,4 +547,19 @@ if __name__ == '__main__':
         print(f"       请确保系统中安装了SimHei字体，或者在代码中指定其他可用的中文字体。")
 
     # 执行推理
-    infer(final_config)
+    try:
+        result = infer(final_config)
+        print(f"推理完成。")
+        # 这里可以根据需要处理或打印推理结果 (result)
+        # 例如，打印特征向量的前几个维度
+        print(f"获取到的特征向量 (前10维): {result.flatten()[:10]}...") 
+        # 或者如果任务是分类，可能需要不同的后处理
+        
+    except FileNotFoundError as e:
+        print(f"推理失败: {e}")
+    except RuntimeError as e:
+        print(f"推理时发生运行时错误: {e}")
+    except ValueError as e:
+        print(f"配置错误: {e}")
+    except Exception as e:
+        print(f"发生意外错误: {e}")
