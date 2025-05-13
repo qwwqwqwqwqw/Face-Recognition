@@ -205,7 +205,7 @@ graph TD;
         R --> I;
     end
 
-    subgraph 对抗学习模块（规划中）
+    subgraph 对抗学习模块
         Attacks[attacks/gradient_attacks.py]
         Attacks --> L;
         Attacks --> Q;
