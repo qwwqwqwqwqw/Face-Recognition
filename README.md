@@ -163,6 +163,7 @@
 
 ### 模块依赖图 (概念)
 
+```mermaid
     subgraph "数据处理模块"
         A[原始图像数据] --> B(CreateDataList.py);
         B -- "生成" --> C[数据列表<br>(trainer.list, test.list, readme.json)];
@@ -227,6 +228,7 @@
         WebApp -.-> S; %% 例如：展示结果
         WebApp -.-> T; %% 例如：展示结果
     end
+```
 
 *(这是一个简化的概念图，展示了主要模块和数据流。)*
 
@@ -441,7 +443,7 @@ data/face/
 
 ### **2. 创建数据列表 (`CreateDataList.py`)**
 此脚本遍历指定的数据集根目录，生成训练/测试列表和元数据文件。
-    ```bash
+```bash
 # 示例: python CreateDataList.py data/face
 # 该命令会在 data/face/ 目录下生成 trainer.list, test.list, readme.json
 python CreateDataList.py <config.data_dir>/<config.class_name>
@@ -596,7 +598,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 ```bash
     # 激活 paddle_env 环境后执行
     python evaluate_on_acceptance_set.py --config_path <指向包含模型信息的配置文件> --model_path <最终模型路径> --acceptance_data_list data/acceptance_test_set/acceptance_test.list --acceptance_label_file data/acceptance_test_set/readme.json [--use_gpu]
-    ```
+```
 
 ### 验收界面
 为了方便直观地展示模型效果和进行用户验收，可以开发一个简单的用户界面。
@@ -654,7 +656,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 
 ### 3. 对抗网络与鲁棒性增强
 *   **目标**: 研究和实现常见的对抗攻击方法，评估模型在这些攻击下的脆弱性，并应用对抗训练等防御策略来提升模型的鲁棒性。
-*   **行动计划与编码指导**:
+*   **行动计划**:
     *   **环境准备**: 确保 PaddlePaddle 环境就绪。
     *   **创建攻击模块 (`attacks/`)**:
         *   在项目根目录下创建 `attacks/` 文件夹。
