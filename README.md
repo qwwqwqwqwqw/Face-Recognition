@@ -164,6 +164,7 @@
 ### 模块依赖图 (概念)
 
 ```mermaid
+graph TD;
     subgraph "数据处理模块"
         A[原始图像数据] --> B(CreateDataList.py);
         B -- "生成" --> C[数据列表<br>(trainer.list, test.list, readme.json)];
@@ -172,7 +173,7 @@
 
     subgraph "配置管理模块"
         E[YAML配置<br>(configs/default_config.yaml)] --> F(config_utils.py);
-        G[命令行参数] --> F; %% 命令行参数由config_utils处理
+        G[命令行参数] --> F;
     end
 
     subgraph "模型定义模块"
@@ -195,7 +196,7 @@
         O -- "生成并保存" --> P[人脸特征库<br>(.pkl)];
 
         Q(infer.py) -- "加载模型" --> N;
-        Q -- "使用特征库<br>(限ArcFace模型)" --> P; %% 修正：明确标签说明
+        Q -- "使用特征库<br>(限ArcFace模型)" --> P;
         Q -- "加载配置" --> F;
         Q -- "构建模型经由" --> I;
 
@@ -206,12 +207,11 @@
 
     subgraph "对抗学习模块 (规划中)"
         Attacks(attacks/gradient_attacks.py)
-        Attacks -- "用于对抗训练" --> L; %% 修正：明确标签
-        Attacks -- "用于鲁棒性评估" --> Q; %% 修正：明确标签
+        Attacks -- "用于对抗训练" --> L;
+        Attacks -- "用于鲁棒性评估" --> Q;
     end
 
     subgraph "用户交互与结果输出模块"
-        %% 命令行参数通过 config_utils.py (F) 影响各核心脚本
         G -- "影响执行" --> L;
         G -- "影响执行" --> O;
         G -- "影响执行" --> Q;
@@ -220,13 +220,12 @@
         Q -- "输出识别结果到" --> S[识别结果<br>(results/)];
         R -- "输出对比结果到" --> T[对比结果<br>(results/)];
 
-        %% WebApp (规划中) 的交互可以添加到这里
         WebApp([交互式Web UI (规划中)])
-        WebApp -.-> L; %% 例如：触发训练、监控
-        WebApp -.-> Q; %% 例如：上传图片识别
-        WebApp -.-> R; %% 例如：上传图片对比
-        WebApp -.-> S; %% 例如：展示结果
-        WebApp -.-> T; %% 例如：展示结果
+        WebApp -.-> L;
+        WebApp -.-> Q;
+        WebApp -.-> R;
+        WebApp -.-> S;
+        WebApp -.-> T;
     end
 ```
 
