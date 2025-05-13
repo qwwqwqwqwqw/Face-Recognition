@@ -29,7 +29,7 @@
 
 1.  **克隆仓库**:
     ```bash
-    git clone [https://github.com/Nahjs/Face-Recognition.git](https://github.com/Nahjs/Face-Recognition.git) 
+    git clone https://github.com/Nahjs/Face-Recognition.git
     cd Face-Recognition
     ```
 2.  **创建并激活Python虚拟环境** (推荐):
@@ -47,7 +47,7 @@
     ```bash
     # 确保 paddle_env 虚拟环境已激活
     # GPU 版本 (示例为CUDA 11.8, 请根据您的CUDA版本和PaddlePaddle官网查找对应安装命令)
-    python -m pip install paddlepaddle-gpu==3.0.0 -i [https://www.paddlepaddle.org.cn/packages/stable/cu118/](https://www.paddlepaddle.org.cn/packages/stable/cu118/)
+    python -m pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
     pip uninstall numpy -y
     pip install numpy==1.26.4 PyYAML opencv-python==4.5.5.64 matplotlib==3.5.3 scikit-learn tqdm
     ```
@@ -109,9 +109,6 @@
 
 ## 📄 目录
 
-<details>
-<summary>点击展开/折叠完整目录</summary>
-
 * [✨ 功能特性 (Core Features)](#-功能特性-core-features)
 * [🚀 快速上手 (Quick Start)](#-快速上手-quick-start)
 * [项目架构与技术栈](#项目架构与技术栈)
@@ -161,62 +158,76 @@
 * [📄 许可证 (License)](#-许可证-license)
 * [🙏 致谢 (Acknowledgements)](#-致谢-acknowledgements)
 
-</details>
 
 ## 项目架构与技术栈
 
 ### 模块依赖图 (概念)
 
-```mermaid
-graph LR
-    subgraph "数据处理"
+    subgraph "数据处理模块"
         A[原始图像数据] --> B(CreateDataList.py);
-        B --> C[trainer.list / test.list];
+        B -- "生成" --> C[数据列表<br>(trainer.list, test.list, readme.json)];
         C --> D(MyReader.py);
     end
 
-    subgraph "配置管理"
-        E[configs/default_config.yaml] --> F(config_utils.py);
-        G[命令行参数] --> F;
+    subgraph "配置管理模块"
+        E[YAML配置<br>(configs/default_config.yaml)] --> F(config_utils.py);
+        G[命令行参数] --> F; %% 命令行参数由config_utils处理
     end
 
-    subgraph "模型构建"
+    subgraph "模型定义模块"
         H(models/vgg_backbone.py) --> I(model_factory.py);
         J(models/resnet_backbone.py) --> I;
         K(heads.py) --> I;
     end
 
-    subgraph "核心流程"
-        L(train.py) -- 使用 --> D;
-        L -- 使用 --> F;
-        L -- 使用 --> I;
-        L -- 使用 --> M(utils/lr_scheduler_factory.py);
-        L --> N[保存的模型 model/];
-        O(create_face_library.py) -- 使用 --> N;
-        O -- 使用 --> C;
-        O -- 使用 --> F;
-        O -- 使用 --> I;
-        O --> P[特征库 .pkl];
-        Q(infer.py) -- 使用 --> N;
-        Q -- 使用 --> P; # ArcFace
-        Q -- 使用 --> F;
-        Q -- 使用 --> I;
-        R(compare.py) -- 使用 --> N;
-        R -- 使用 --> F;
-        R -- 使用 --> I;
+    subgraph "核心流程执行模块"
+        L(train.py) -- "使用数据加载器" --> D;
+        L -- "加载配置" --> F;
+        L -- "构建模型经由" --> I;
+        L -- "使用学习率调度器" --> M(utils/lr_scheduler_factory.py);
+        L -- "保存训练结果" --> N[训练模型/检查点<br>(model/)];
+
+        O(create_face_library.py) -- "加载模型" --> N;
+        O -- "读取数据列表" --> C;
+        O -- "加载配置" --> F;
+        O -- "构建骨干网络经由" --> I;
+        O -- "生成并保存" --> P[人脸特征库<br>(.pkl)];
+
+        Q(infer.py) -- "加载模型" --> N;
+        Q -- "使用特征库<br>(限ArcFace模型)" --> P; %% 修正：明确标签说明
+        Q -- "加载配置" --> F;
+        Q -- "构建模型经由" --> I;
+
+        R(compare.py) -- "加载模型" --> N;
+        R -- "加载配置" --> F;
+        R -- "构建骨干网络经由" --> I;
     end
 
-    subgraph "对抗模块 (规划中)"
-        Attacks(attacks/gradient_attacks.py) --> L; % Adversarial Training
-        Attacks --> Q; % Evaluate on Adv Examples
+    subgraph "对抗学习模块 (规划中)"
+        Attacks(attacks/gradient_attacks.py)
+        Attacks -- "用于对抗训练" --> L; %% 修正：明确标签
+        Attacks -- "用于鲁棒性评估" --> Q; %% 修正：明确标签
     end
 
-    subgraph "用户交互与结果"
-        G --> L; G --> O; G --> Q; G --> R;
-        Q --> S[识别结果 results/];
-        R --> T[对比结果 results/];
+    subgraph "用户交互与结果输出模块"
+        %% 命令行参数通过 config_utils.py (F) 影响各核心脚本
+        G -- "影响执行" --> L;
+        G -- "影响执行" --> O;
+        G -- "影响执行" --> Q;
+        G -- "影响执行" --> R;
+
+        Q -- "输出识别结果到" --> S[识别结果<br>(results/)];
+        R -- "输出对比结果到" --> T[对比结果<br>(results/)];
+
+        %% WebApp (规划中) 的交互可以添加到这里
+        WebApp([交互式Web UI (规划中)])
+        WebApp -.-> L; %% 例如：触发训练、监控
+        WebApp -.-> Q; %% 例如：上传图片识别
+        WebApp -.-> R; %% 例如：上传图片对比
+        WebApp -.-> S; %% 例如：展示结果
+        WebApp -.-> T; %% 例如：展示结果
     end
-```
+
 *(这是一个简化的概念图，展示了主要模块和数据流。)*
 
 ### 核心技术栈
@@ -232,35 +243,45 @@ graph LR
     *   `numpy`: 数值计算基础库。
 
 ## 项目结构说明
-Face-Recognition/
-├── attacks/ # [新增/规划中] 对抗攻击实现模块
-│ └── gradient_attacks.py # FGSM, PGD等基于梯度的攻击
-├── configs/ # 配置目录
-│ └── default_config.yaml # 默认YAML配置文件 (包含多种预设模式及对抗训练配置)
-├── data/ # 数据目录 (示例: data/face)
-│ └── face/ # 示例人脸数据集 (可替换为 data/<config.class_name>)
-├── model/ # 模型保存目录 (由配置文件中 model_save_dir 指定)
-├── models/ # 存放骨干网络、[规划中]GAN生成器/判别器等定义
-│ ├── vgg_backbone.py # VGG骨干网络定义
-│ ├── resnet_backbone.py # ResNet骨干网络定义
-│ ├── generator_2d.py # [规划中] 2D GAN 生成器
-│ └── discriminator_2d.py # [规划中] 2D GAN 判别器
-├── heads.py # 存放模型头部定义 (如ArcFaceHead, CrossEntropyHead)
-├── utils/ # 存放工具/辅助模块
-│ ├── lr_scheduler_factory.py # 学习率调度器工厂
-│ └── visualization_utils.py # [规划中] 可视化辅助脚本
-├── results/ # 推理和对比结果图片保存目录
-├── CreateDataList.py # 创建数据列表脚本
-├── MyReader.py # 图像读取和预处理模块
-├── config_utils.py # 配置加载与合并工具模块
-├── train.py # 模型训练脚本 (将集成对抗训练逻辑)
-├── create_face_library.py # 创建人脸特征库脚本 (用于ArcFace模型推理)
-├── infer.py # 人脸识别预测脚本 (将集成对抗样本测试)
-├── compare.py # 人脸对比工具脚本
-├── train.sh # 自动化训练脚本 (用于本地或服务器批量训练)
-├── evaluate_robustness.py # [规划中] 评估模型在对抗样本上性能的脚本
-└── README.md # 项目说明文档 (本文档)
 
+```
+
+Face-Recognition/
+├── attacks/                  # [新增/规划中] 对抗攻击实现模块
+│   └── gradient_attacks.py   # FGSM, PGD等基于梯度的攻击
+├── configs/                  # 配置目录
+│   └── default_config.yaml   # 默认YAML配置文件 (包含多种预设模式及对抗训练配置)
+├── data/                     # 数据目录 (示例: data/face)
+│   └── face/                 # 示例人脸数据集 (可替换为 data/<config.class_name>)
+│       ├── person1/
+│       │   └── 1.jpg
+│       │   └── ...
+│       └── person2/
+│           └── 1.jpg
+│           └── ...
+├── model/                    # 模型保存目录 (由配置文件中 model_save_dir 指定)
+├── models/                   # 存放骨干网络、[规划中]GAN生成器/判别器等定义
+│   ├── vgg_backbone.py       # VGG骨干网络定义
+│   ├── resnet_backbone.py    # ResNet骨干网络定义
+│   ├── generator_2d.py       # [规划中] 2D GAN 生成器
+│   └── discriminator_2d.py   # [规划中] 2D GAN 判别器
+├── heads.py                  # 存放模型头部定义 (如ArcFaceHead, CrossEntropyHead)
+├── utils/                    # 存放工具/辅助模块
+│   ├── lr_scheduler_factory.py # 学习率调度器工厂
+│   └── visualization_utils.py  # [规划中] 可视化辅助脚本
+├── results/                  # 推理和对比结果图片保存目录
+├── CreateDataList.py         # 创建数据列表脚本
+├── MyReader.py               # 图像读取和预处理模块
+├── config_utils.py           # 配置加载与合并工具模块
+├── train.py                  # 模型训练脚本 (将集成对抗训练逻辑)
+├── create_face_library.py    # 创建人脸特征库脚本 (用于ArcFace模型推理)
+├── infer.py                  # 人脸识别预测脚本 (将集成对抗测试)
+├── compare.py                # 人脸对比工具脚本
+├── train.sh                  # 自动化训练脚本 (用于本地或服务器批量训练)
+├── evaluate_robustness.py    # [规划中] 评估模型在对抗样本上性能的脚本
+└── README.md                 # 项目说明文档 (本文档)
+
+```
 
 ## ⚠️ 重要环境准备
 [(返回目录)](#-目录)
@@ -269,31 +290,31 @@ Face-Recognition/
 
 ### 1. 进入项目根目录
 所有后续命令都应在克隆本仓库后的 `Face-Recognition` 目录下执行。
-    ```bash
+```bash
     cd path/to/Face-Recognition
-    ```
+```
 
 ### 2. 激活Python虚拟环境
 本项目推荐使用名为 `paddle_env` 的虚拟环境。
-    ```bash
-    # 如果是第一次，创建虚拟环境:
+```bash
+# 如果是第一次，创建虚拟环境:
     # python3 -m venv paddle_env
     # Linux/macOS:
     source paddle_env/bin/activate
     # Windows:
     # paddle_env\Scripts\activate
-    ```
+```
 **非常重要**: 每次执行项目中的 Python 脚本 (`train.py`, `infer.py` 等) 或 `pip install` 命令前，都请确保您已在当前终端会话中激活了此虚拟环境。
 
 ### 3. GPU用户环境变量设置 (重要)
 如果您计划使用GPU进行训练或推理，请在您的终端会话中设置以下环境变量。将这些命令添加到您的 `~/.bashrc` 或 `~/.zshrc` 文件中可以使其永久生效。
-    ```bash
-    # 根据您的CUDA实际安装路径调整
-    export CUDA_HOME=/usr/local/cuda
-    # 对于WSL用户，可能需要包含 /usr/lib/wsl/lib
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_HOME/lib64:/usr/lib/wsl/lib
-    ```
-    运行 `source ~/.bashrc` (或对应的shell配置文件) 使更改生效。
+```bash
+# 根据您的CUDA实际安装路径调整
+export CUDA_HOME=/usr/local/cuda
+# 对于WSL用户，可能需要包含 /usr/lib/wsl/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_HOME/lib64:/usr/lib/wsl/lib
+```
+运行 `source ~/.bashrc` (或对应的shell配置文件) 使更改生效。
 
 ### 4. 安装依赖
 请参考 [🚀 快速上手 (Quick Start)](#-快速上手-quick-start)部分的依赖安装命令。确保在已激活的 `paddle_env` 虚拟环境中执行。
@@ -360,7 +381,7 @@ resnet_arcface_cosine_config: # 名称应与 active_config 或 train.sh 中的�
       arcface_s: 64.0 # ArcFace scale
 
   # 训练超参数
-  batch_size: 32
+batch_size: 32
   epochs: 120
   learning_rate: 0.001 # 初始学习率
   optimizer_type: 'AdamW'
@@ -407,17 +428,20 @@ resnet_arcface_cosine_config: # 名称应与 active_config 或 train.sh 中的�
 
 ### **1. 准备数据**
 将人脸数据按以下结构存放 (假设 `config.data_dir` 为 `data`, `config.class_name` 为 `face`):
+```
 data/face/
 ├── person1/
 │ ├── 1.jpg ...
 ├── person2/
 │ ├── 1.jpg ...
 └── ...
+```
+
 建议预先对人脸进行检测和裁剪，确保人脸区域清晰且大小适中。
 
 ### **2. 创建数据列表 (`CreateDataList.py`)**
 此脚本遍历指定的数据集根目录，生成训练/测试列表和元数据文件。
-```bash
+    ```bash
 # 示例: python CreateDataList.py data/face
 # 该命令会在 data/face/ 目录下生成 trainer.list, test.list, readme.json
 python CreateDataList.py <config.data_dir>/<config.class_name>
@@ -569,7 +593,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
     4.  计算标准评估指标，如Top-1/Top-5准确率（分类任务），或人脸验证的TAR@FAR（如果实现1:1验证逻辑）。
     5.  输出最终性能报告。
 *   **执行示例**:
-    ```bash
+```bash
     # 激活 paddle_env 环境后执行
     python evaluate_on_acceptance_set.py --config_path <指向包含模型信息的配置文件> --model_path <最终模型路径> --acceptance_data_list data/acceptance_test_set/acceptance_test.list --acceptance_label_file data/acceptance_test_set/readme.json [--use_gpu]
     ```
