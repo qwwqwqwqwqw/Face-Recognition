@@ -87,7 +87,7 @@ for config_name in "${CONFIG_NAMES_TO_TRAIN[@]}"; do
     echo "训练日志将保存到: ${LOG_FILE_TRAIN}"
 
     # 构建 train.py 命令
-    TRAIN_CMD="python train.py --config_path "${CONFIG_FILE}" --active_config "${config_name}" --use_gpu --resume --source manual --class_name face" # <--- 在这里添加 --class_name face
+    TRAIN_CMD="python train.py --config_path "${CONFIG_FILE}" --active_config "${config_name}" --use_gpu --resume --source manual" 
 
     echo "执行命令: ${TRAIN_CMD}"
     # 使用 eval 执行命令，并将标准输出和错误都重定向到日志文件

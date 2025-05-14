@@ -17,275 +17,210 @@ import os
 import json
 import random
 import argparse # 导入 argparse
+from tqdm import tqdm # For progress bar, if not used, can be removed
 
 class CreateDataList:
     """
-    用于创建图像数据列表和元数据文件的核心类。
-
-    该类通过遍历用户指定的数据集根目录，识别其中的子文件夹作为不同的类别，
-    然后为每个类别下的图像文件生成相应的条目，并将其分配到训练列表或测试列表中。
-    同时，它还会收集关于数据集的统计信息，并将其保存为一个JSON格式的元数据文件。
+    遍历指定数据集的根目录，为每个类别创建图像列表，
+    并将它们划分为训练集、测试集和新增的验收集。
+    同时，它会生成一个元数据文件 (readme.json)，包含类别到ID的映射和划分统计。
     """
-    def __init__(self):
-        """
-        初始化CreateDataList类。
 
-        目前该构造函数不执行特殊操作，仅作为标准类结构的一部分。
-        未来可以根据需要扩展，例如接收一些默认配置参数。
-        """
-        pass # 目前不需要特殊初始化操作
+    def __init__(self):
+        self.label_id_counter = 0 # 用于为每个类别分配唯一的整数ID
+        self.class_to_id_map = {} # 存储类别名称到整数ID的映射
+        self.data_statistics = { # 存储每个集合的样本数量
+            "total_classes": 0,
+            "total_images": 0,
+            "train_set_count": 0,
+            "test_set_count": 0,
+            "acceptance_set_count": 0, # 新增
+            "images_per_class": {}
+        }
+
+    def _reset_state(self):
+        """重置内部状态以便处理新的数据集或多次调用。"""
+        self.label_id_counter = 0
+        self.class_to_id_map = {}
+        self.data_statistics = {
+            "total_classes": 0,
+            "total_images": 0,
+            "train_set_count": 0,
+            "test_set_count": 0,
+            "acceptance_set_count": 0,
+            "images_per_class": {}
+        }
 
     def create_data_list(self, data_root_path: str, 
                          train_list_name: str = "trainer.list", 
                          test_list_name: str = "test.list", 
+                         acceptance_list_name: str = "acceptance.list", # 新增验收集列表文件名
                          meta_file_name: str = "readme.json",
-                         train_ratio: float = 0.8,
+                         train_ratio: float = 0.7, # 调整默认训练集比例
+                         acceptance_ratio: float = 0.1, # 新增验收集比例
                          output_num_classes_file: str = None) -> None:
         """
-        遍历指定的数据集根目录，为其中的图像生成训练列表、测试列表和元数据JSON文件。
-
-        主要流程：
-        1. 清理（通过覆盖写入模式 'w'）或创建指定名称的训练、测试列表文件和元数据文件。
-        2. 扫描 `data_root_path` 下的第一级子目录，每个子目录被视为一个独立的类别。
-        3. 对识别出的类别进行排序，以确保每次运行时生成的类别标签ID保持一致。
-        4. 遍历每个类别目录中的图像文件（支持常见图像格式如 .jpg, .png 等）。
-        5. 对每个类别内的图像文件也进行排序，以保证处理顺序的一致性。
-        6. 按照预设的简单划分策略（例如，每N张图片取一张作为测试样本），
-           将图像条目（`图像相对路径\\t类别标签ID`）写入训练列表或测试列表。
-        7. 收集每个类别的统计信息（名称、标签ID、图像总数、训练/测试图像数）。
-        8. 将整个数据集的元数据（包括所有类别的详细信息）写入JSON文件。
+        生成训练、测试和验收数据列表文件，以及一个包含类别映射的元数据JSON文件。
 
         Args:
-            data_root_path (str): 数据集的根目录路径。
-                                  此目录下应包含对应各类别的子文件夹，
-                                  每个子文件夹中存放该类别的图像。
-                                  例如: `data_root_path = 'data/face'`
-                                        `'data/face/person1/img1.jpg'`
-                                        `'data/face/person2/img2.jpg'`
-            train_list_name (str, optional): 生成的训练数据列表文件名。
-                                             默认为 "trainer.list"。
-            test_list_name (str, optional): 生成的测试数据列表文件名。
-                                            默认为 "test.list"。
-            meta_file_name (str, optional): 生成的元数据JSON文件名。
-                                            默认为 "readme.json"。
-            train_ratio (float, optional): 训练集所占的比例 (0 到 1 之间)。
-            output_num_classes_file (str, optional): 将计算出的类别数写入的文件路径。
-                                                    如果为 None，则不写入文件。
-
-        Returns:
-            None: 该方法直接将生成的文件写入磁盘，不返回任何值。
+            data_root_path (str): 数据集根目录的路径。
+                                  期望的结构是: data_root_path/class_name/image_files
+            train_list_name (str, optional): 输出的训练列表文件名。
+            test_list_name (str, optional): 输出的测试列表文件名。
+            acceptance_list_name (str, optional): 输出的验收列表文件名。
+            meta_file_name (str, optional): 输出的元数据JSON文件名。
+            train_ratio (float, optional): 训练集所占的比例 (0.0 到 1.0)。
+            acceptance_ratio (float, optional): 验收集所占的比例 (0.0 到 1.0)。
+                                            测试集比例将是 1.0 - train_ratio - acceptance_ratio。
+            output_num_classes_file (str, optional): 如果提供，将类别总数写入此文件。
 
         Raises:
-            FileNotFoundError: 如果 `data_root_path` 不存在。
-            IOError: 如果在写入列表文件或元数据文件时发生IO错误。
-            TypeError: 如果在序列化元数据到JSON时发生类型错误。
+            ValueError: 如果 train_ratio 和 acceptance_ratio 的和不在 (0, 1) 区间内。
+            FileNotFoundError: 如果 data_root_path 不存在。
         """
-        print(f"开始为数据集 '{data_root_path}' 创建数据列表...")
+        self._reset_state() #确保每次调用都是干净的状态
+
+        if not (0 < train_ratio < 1 and 0 <= acceptance_ratio < 1 and 0 < train_ratio + acceptance_ratio <= 1):
+            raise ValueError("train_ratio 必须在 (0,1) 开区间，acceptance_ratio 必须在 [0,1) 开区间，且它们的和必须在 (0, 1] 闭区间。")
+
+        if not os.path.exists(data_root_path):
+            raise FileNotFoundError(f"指定的数据根目录 '{data_root_path}' 不存在。")
+
+        output_dir = data_root_path
+        train_list_path = os.path.join(output_dir, train_list_name)
+        test_list_path = os.path.join(output_dir, test_list_name)
+        acceptance_list_path = os.path.join(output_dir, acceptance_list_name)
+        meta_file_path = os.path.join(output_dir, meta_file_name)
+
+        all_images_by_class = {} 
         
-        # --- 文件路径准备 ---
-        # 训练列表、测试列表和元数据文件的完整路径。
-        # 这些文件将直接保存在 data_root_path 目录下。
-        train_file_path = os.path.join(data_root_path, train_list_name)
-        test_file_path = os.path.join(data_root_path, test_list_name)
-        meta_file_path = os.path.join(data_root_path, meta_file_name)
-
-        # --- 清理旧的列表文件 --- 
-        # 最佳实践提示：由于后续使用 'w' (写入) 模式打开文件，旧文件（如果存在）会被自动覆盖。
-        # 无需用户手动删除或在此处添加显式删除逻辑。
-        # print(f"提示: 将使用写入模式 ('w') 创建/覆盖列表文件和元数据文件。")
-        # print(f"       如果 '{train_file_path}', '{test_file_path}', 或 '{meta_file_path}' 已存在，它们的内容将被覆盖。")
-
-        # --- 类别发现与统计初始化 ---
-        class_details = [] # 存储所有类别详细信息的列表
+        print(f"正在扫描数据目录: {data_root_path} ...")
+        class_names = sorted([d for d in os.listdir(data_root_path) if os.path.isdir(os.path.join(data_root_path, d))])
         
-        # 获取根目录下所有的类别子文件夹 (每个子文件夹代表一个类别)
-        try:
-            # os.listdir 列出目录下所有文件和文件夹名
-            # os.path.isdir 检查给定路径是否为目录
-            class_dirs_unordered = [d for d in os.listdir(data_root_path) if os.path.isdir(os.path.join(data_root_path, d))]
-            if not class_dirs_unordered:
-                print(f"错误: 在目录 '{data_root_path}' 下没有找到任何子文件夹作为类别。请检查数据集结构。")
-                return
-        except FileNotFoundError:
-            print(f"错误: 指定的数据集根目录 '{data_root_path}' 不存在。请提供有效的路径。")
-            return
-        except Exception as e:
-            print(f"错误: 访问数据集目录 '{data_root_path}' 时发生意外：{e}")
+        if not class_names:
+            print(f"警告: 在 '{data_root_path}' 中没有找到子目录（类别）。列表文件将为空。")
+            open(train_list_path, 'w').close()
+            open(test_list_path, 'w').close()
+            open(acceptance_list_path, 'w').close()
+            with open(meta_file_path, 'w', encoding='utf-8') as f_meta:
+                json.dump(self.data_statistics, f_meta, indent=4, ensure_ascii=False)
             return
 
-        # 对类别文件夹进行排序，确保每次生成的标签ID具有一致性。
-        # 例如，如果类别是 ['person_c', 'person_a', 'person_b']，排序后会是 ['person_a', 'person_b', 'person_c']，
-        # 这样 'person_a' 总是会得到标签0，'person_b' 总是标签1，以此类推。
-        class_dirs_sorted = sorted(class_dirs_unordered)
+        self.data_statistics["total_classes"] = len(class_names)
 
-        current_class_label = 0  # 类别标签从0开始递增
-        total_images_count = 0   # 数据集中所有图像的总数
+        for class_name in tqdm(class_names, desc="处理类别"):
+            if class_name not in self.class_to_id_map:
+                self.class_to_id_map[class_name] = self.label_id_counter
+                current_class_id = self.label_id_counter
+                self.label_id_counter += 1
+            else:
+                current_class_id = self.class_to_id_map[class_name]
 
-        # --- 打开列表文件并处理每个类别 ---
-        # 使用 'w' (写入模式) 打开文件，这样如果文件已存在，其内容会被清空并从头开始写入。
-        # 使用 `with open(...) as ...:` 结构可以确保文件在使用完毕后自动关闭，即使发生错误。
-        # `encoding='utf-8'` 确保能正确处理包含非ASCII字符的文件路径或类别名。
-        try:
-            with open(train_file_path, 'w', encoding='utf-8') as f_train, \
-                 open(test_file_path, 'w', encoding='utf-8') as f_test:
-                
-                print(f"在 '{data_root_path}' 中找到 {len(class_dirs_sorted)} 个类别 (子文件夹): {class_dirs_sorted}")
-                
-                # 遍历每个已排序的类别子文件夹
-                for class_dir_name in class_dirs_sorted:
-                    class_full_path = os.path.join(data_root_path, class_dir_name)
-                    
-                    # 获取当前类别文件夹下的所有文件
-                    try:
-                        all_files_in_class = [f for f in os.listdir(class_full_path) if os.path.isfile(os.path.join(class_full_path, f))]
-                    except Exception as e:
-                        print(f"警告: 无法读取类别文件夹 '{class_dir_name}' (路径: {class_full_path}) 下的文件列表: {e}。已跳过此类别。")
-                        continue # 跳到下一个类别
+            class_path = os.path.join(data_root_path, class_name)
+            images_in_class = []
+            for img_file in os.listdir(class_path):
+                if img_file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                    img_relative_path = os.path.join(class_name, img_file)
+                    images_in_class.append(img_relative_path)
+            
+            if not images_in_class:
+                print(f"警告: 类别 '{class_name}' 为空，已跳过。")
+                continue
 
-                    # 过滤常见非图片文件，或只选择特定后缀的图片
-                    # 确保只处理常见的图像文件扩展名，转换为小写以进行不区分大小写的比较。
-                    valid_image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp')
-                    image_files_in_class_unsorted = [f for f in all_files_in_class if f.lower().endswith(valid_image_extensions)]
-                    
-                    # 对每个类别下的图片文件名排序，保证处理顺序一致，进而使得划分到训练/测试集的结果更稳定。
-                    image_files_in_class_sorted = sorted(image_files_in_class_unsorted)
+            random.shuffle(images_in_class)
+            num_images_in_class = len(images_in_class)
+            self.data_statistics["total_images"] += num_images_in_class
+            self.data_statistics["images_per_class"][class_name] = num_images_in_class
 
-                    if not image_files_in_class_sorted:
-                        print(f"警告: 类别文件夹 '{class_dir_name}' 为空或不包含有效格式的图片文件 (支持的格式: {valid_image_extensions})。已跳过此类别。")
-                        continue # 跳到下一个类别
+            num_train = int(num_images_in_class * train_ratio)
+            num_acceptance = int(num_images_in_class * acceptance_ratio)
+            num_test = num_images_in_class - num_train - num_acceptance
 
-                    images_in_current_class_count = 0 # 当前类别的图像计数器
-                    test_images_in_current_class = 0    # 当前类别分到测试集的图像数量
-                    train_images_in_current_class = 0   # 当前类别分到训练集的图像数量
+            # 确保在样本极少时至少有一个训练样本，并调整其他集合大小
+            if num_images_in_class > 0 and num_train == 0:
+                num_train = 1
+                if num_acceptance >= num_images_in_class - num_train:
+                    num_acceptance = num_images_in_class - num_train
+                num_test = num_images_in_class - num_train - num_acceptance
+            
+            if num_test < 0: # 如果测试集因取整变为负数，优先从验收集调整，再从训练集调整
+                if num_acceptance >= abs(num_test):
+                    num_acceptance += num_test # num_test is negative
+                else:
+                    remaining_negative = num_test + num_acceptance
+                    num_acceptance = 0
+                    num_train += remaining_negative
+                num_test = 0
+            if num_train < 0: num_train = 0 # 防止训练集也变为负数（不太可能发生在此逻辑中）
 
-                    print(f"  正在处理类别: '{class_dir_name}' (将分配标签ID: {current_class_label}), 发现 {len(image_files_in_class_sorted)} 张有效图片...")
-                    
-                    # 遍历当前类别中的每一张已排序的图片
-                    for image_file_name in image_files_in_class_sorted:
-                        # 构建图像文件的完整路径 (相对于项目根目录或数据集根目录，取决于 data_root_path 的形式)
-                        # 为了使列表文件中的路径具有通用性，通常希望这里的路径是相对于 data_root_path 的。
-                        # 例如，如果 data_root_path 是 'data/face'，class_dir_name 是 'person1'，
-                        # image_file_name 是 'img1.jpg'，则希望写入列表的是 'person1/img1.jpg'。
-                        # 因此，使用 os.path.join(class_dir_name, image_file_name) 而不是完整的 class_full_path。
-                        relative_image_path = os.path.join(class_dir_name, image_file_name)
-                        # 在Windows上，路径分隔符可能是'\\', 统一转换为'/'以保证跨平台兼容性
-                        relative_image_path = relative_image_path.replace('\\\\', '/')
-                        
-                        # 数据划分策略：例如，每10张图片中取1张作为测试数据，其余作为训练数据。
-                        # 这是一个简单的基于计数的划分方法。
-                        # images_in_current_class_count 是当前类别已处理图像的序号 (0-indexed)。
-                        if images_in_current_class_count % 10 == 0: # 每10张取第1张 (索引0, 10, 20...)
-                            f_test.write(f"{relative_image_path}\t{current_class_label}\n")
-                            test_images_in_current_class += 1
-                        else:
-                            f_train.write(f"{relative_image_path}\t{current_class_label}\n")
-                            train_images_in_current_class += 1
-                        
-                        images_in_current_class_count += 1
-                        total_images_count += 1 # 累加整个数据集的图像总数
-                    
-                    # 记录当前类别的详细信息，用于后续生成元数据文件
-                    class_info = {
-                        'class_name': class_dir_name,            # 类别名称 (即子文件夹名)
-                        'class_label': current_class_label,      # 分配给该类别的整数标签ID (0-indexed)
-                        'class_images_count': images_in_current_class_count, # 该类别下的图像总数
-                        'class_train_images': train_images_in_current_class, # 分配到训练集的数量
-                        'class_test_images': test_images_in_current_class    # 分配到测试集的数量
-                    }
-                    class_details.append(class_info)
-                    current_class_label += 1 # 为下一个类别准备标签ID
-        except IOError as e:
-            print(f"错误: 写入训练/测试列表文件时发生IO错误: {e}")
-            return # 发生IO错误，通常无法继续
-        except Exception as e:
-            print(f"错误: 处理类别或写入列表文件时发生意外: {e}")
-            return
 
-        print(f"训练数据列表已成功保存到: {train_file_path}")
-        print(f"测试数据列表已成功保存到: {test_file_path}")
+            if current_class_id not in all_images_by_class:
+                 all_images_by_class[current_class_id] = {'train': [], 'test': [], 'acceptance': []}
 
-        # --- 生成并保存元数据 (readme.json) --- 
-        # 获取数据集的顶层目录名作为'数据集名称' (例如 'face')
-        # data_root_path.rstrip('/') 移除路径末尾可能存在的斜杠，保证basename行为一致
-        dataset_name = os.path.basename(data_root_path.rstrip(os.sep)) # 使用os.sep保证跨平台
+            all_images_by_class[current_class_id]['train'].extend(images_in_class[:num_train])
+            all_images_by_class[current_class_id]['acceptance'].extend(images_in_class[num_train : num_train + num_acceptance])
+            all_images_by_class[current_class_id]['test'].extend(images_in_class[num_train + num_acceptance :])
+            
+            self.data_statistics["train_set_count"] += len(all_images_by_class[current_class_id]['train'])
+            self.data_statistics["acceptance_set_count"] += len(all_images_by_class[current_class_id]['acceptance'])
+            self.data_statistics["test_set_count"] += len(all_images_by_class[current_class_id]['test'])
+
+        print(f"正在写入列表文件到: {output_dir}")
+        with open(train_list_path, 'w', encoding='utf-8') as f_train, \
+             open(test_list_path, 'w', encoding='utf-8') as f_test, \
+             open(acceptance_list_path, 'w', encoding='utf-8') as f_accept:
+            
+            sorted_class_ids = sorted(all_images_by_class.keys())
+
+            for class_id in sorted_class_ids:
+                for img_path in all_images_by_class[class_id]['train']:
+                    f_train.write(f"{img_path}\t{class_id}\n")
+                for img_path in all_images_by_class[class_id]['acceptance']:
+                    f_accept.write(f"{img_path}\t{class_id}\n")
+                for img_path in all_images_by_class[class_id]['test']:
+                    f_test.write(f"{img_path}\t{class_id}\n")
+        
+        print("列表文件写入完成。")
         
         meta_data_to_save = {
-            'dataset_name': dataset_name,                     # 数据集的名称 (通常是根文件夹名)
-            'total_classes': len(class_details),             # 数据集中总的类别数量
-            'total_images': total_images_count,              # 数据集中所有图像的总数
-            'class_detail': class_details                    # 每个类别的详细信息列表
+            "class_to_id_map": self.class_to_id_map,
+            "data_statistics": self.data_statistics,
+            "generation_parameters": {
+                "data_root_path": data_root_path,
+                "train_list_name": train_list_name,
+                "test_list_name": test_list_name,
+                "acceptance_list_name": acceptance_list_name,
+                "meta_file_name": meta_file_name,
+                "train_ratio_config": train_ratio,
+                "acceptance_ratio_config": acceptance_ratio,
+                # 计算实际的测试集比例用于记录
+                "effective_test_ratio": (self.data_statistics['test_set_count'] / self.data_statistics['total_images'] 
+                                         if self.data_statistics['total_images'] > 0 else 0)
+            }
         }
-        
         try:
             with open(meta_file_path, 'w', encoding='utf-8') as f_meta:
-                # json.dump 用于将Python字典序列化为JSON格式并写入文件。
-                # ensure_ascii=False: 允许JSON文件中直接包含非ASCII字符 (如中文类别名)，而不是转义为 \\uXXXX。
-                # indent=4: 对JSON输出进行格式化，使其更易读（使用4个空格缩进）。
-                json.dump(meta_data_to_save, f_meta, ensure_ascii=False, indent=4) 
-            print(f"元数据文件已成功保存到: {meta_file_path}")
-        except IOError as e:
-            print(f"错误: 无法写入元数据文件 '{meta_file_path}': {e}")
-        except TypeError as e:
-            print(f"错误: 序列化元数据到JSON时发生类型错误 (通常是数据结构问题): {e}")
+                json.dump(meta_data_to_save, f_meta, indent=4, ensure_ascii=False)
+            print(f"元数据文件 '{meta_file_name}' 已保存到 '{output_dir}'.")
         except Exception as e:
-            print(f"错误: 保存元数据文件时发生意外: {e}")
-            
-        print(f"\n数据列表和元数据创建完成！")
-        print(f"总共处理了 {total_images_count} 张图片，这些图片分属于 {len(class_details)} 个类别。")
+            print(f"错误: 保存元数据文件到 {meta_file_path} 失败: {e}")
 
-        # 随机打乱列表
-        all_file_paths = [f"{relative_image_path}\t{current_class_label}" for relative_image_path in [os.path.join(class_dir_name, image_file_name) for image_file_name in image_files_in_class_sorted]]
-        random.shuffle(all_file_paths)
-
-        # 划分训练集和评估集
-        split_index = int(len(all_file_paths) * train_ratio)
-        train_list = all_file_paths[:split_index]
-        eval_list = all_file_paths[split_index:]
-
-        print(f"\n总共找到 {len(all_file_paths)} 个有效图片文件。")
-        print(f"划分为: {len(train_list)} 个训练样本, {len(eval_list)} 个评估样本 (比例 ≈ {train_ratio:.2f})")
-
-        # 确保输出目录存在
-        if not os.path.exists(data_root_path):
-            os.makedirs(data_root_path)
-            print(f"创建输出目录: {data_root_path}")
-
-        # 保存训练列表
-        train_list_path = os.path.join(data_root_path, train_list_name)
-        try:
-            with open(train_list_path, 'w', encoding='utf-8') as f:
-                for line in train_list:
-                    f.write(line + '\n')
-            print(f"训练列表已保存到: {train_list_path}")
-        except IOError as e:
-            print(f"错误: 无法写入训练列表文件 {train_list_path}: {e}")
-
-        # 保存评估列表
-        eval_list_path = os.path.join(data_root_path, test_list_name)
-        try:
-            with open(eval_list_path, 'w', encoding='utf-8') as f:
-                for line in eval_list:
-                    f.write(line + '\n')
-            print(f"评估列表已保存到: {eval_list_path}")
-        except IOError as e:
-            print(f"错误: 无法写入评估列表文件 {eval_list_path}: {e}")
-
-        # 将类别数写入文件 (如果指定了路径)
         if output_num_classes_file:
             try:
-                # 确保目录存在
-                num_classes_output_dir = os.path.dirname(output_num_classes_file)
-                if num_classes_output_dir and not os.path.exists(num_classes_output_dir):
-                    os.makedirs(num_classes_output_dir)
-                    print(f"为类别数文件创建目录: {num_classes_output_dir}")
-                    
-                with open(output_num_classes_file, 'w', encoding='utf-8') as f:
-                    f.write(str(len(class_details)))
-                print(f"类别数 ({len(class_details)}) 已写入: {output_num_classes_file}")
-            except IOError as e:
-                print(f"错误: 无法写入类别数文件 {output_num_classes_file}: {e}")
-
-        print("\n数据列表生成完毕。")
+                with open(output_num_classes_file, 'w', encoding='utf-8') as f_num_classes:
+                    f_num_classes.write(str(self.data_statistics["total_classes"]))
+                print(f"类别总数 ({self.data_statistics['total_classes']}) 已写入到: {output_num_classes_file}")
+            except Exception as e:
+                print(f"错误: 写入类别总数到文件 {output_num_classes_file} 失败: {e}")
+        
+        print("\n--- 数据集划分统计 ---")
+        print(f"总类别数: {self.data_statistics['total_classes']}")
+        print(f"总图片数: {self.data_statistics['total_images']}")
+        print(f"训练集图片数: {self.data_statistics['train_set_count']}")
+        print(f"验收集图片数: {self.data_statistics['acceptance_set_count']}")
+        print(f"测试集图片数: {self.data_statistics['test_set_count']}")
+        print("-----------------------\n")
+        print("数据列表创建完成。")
 
 # --- 脚本主入口 ---
 if __name__ == '__main__':
@@ -327,8 +262,10 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default=None,
                         help='生成的 train_list.txt 和 eval_list.txt 文件的输出目录。'
                              '如果未指定，则默认使用 data_root 目录。')
-    parser.add_argument('--train_ratio', type=float, default=0.8,
-                        help='训练集所占的比例 (0 到 1 之间)，剩余部分为评估集。默认为 0.8。')
+    parser.add_argument('--train_ratio', type=float, default=0.7,
+                        help='训练集所占的比例 (0.0 到 1.0)，剩余部分为评估集。默认为 0.7。')
+    parser.add_argument('--acceptance_ratio', type=float, default=0.1,
+                        help='验收集所占的比例 (0.0 到 1.0)，测试集比例将是 1.0 - train_ratio - acceptance_ratio。默认为 0.1。')
     parser.add_argument('--output_num_classes_file', type=str, default=None,
                         help='可选参数。指定一个文件路径，用于写入计算出的类别总数。'
                              '例如: /path/to/project/latest_num_classes.txt')
@@ -342,11 +279,13 @@ if __name__ == '__main__':
     # 执行列表创建
     data_lister_instance.create_data_list(
         data_root_path=args.data_root,
-        train_list_name="train_list.txt",
-        test_list_name="eval_list.txt",
+        train_list_name="train.list",
+        test_list_name="test.list",
+        acceptance_list_name="acceptance.list",
         meta_file_name="readme.json",
         train_ratio=args.train_ratio,
+        acceptance_ratio=args.acceptance_ratio,
         output_num_classes_file=args.output_num_classes_file
     )
     
-    print("\n脚本执行完毕。请检查在数据集根目录下生成的列表文件 (train_list.txt, eval_list.txt) 和元数据文件 (readme.json)。") 
+    print("\n脚本执行完毕。请检查在数据集根目录下生成的列表文件 (train_list.txt, eval_list.txt, acceptance_list.txt) 和元数据文件 (readme.json)。") 

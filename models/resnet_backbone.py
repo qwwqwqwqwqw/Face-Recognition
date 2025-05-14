@@ -1,7 +1,7 @@
 # resnet_backbone.py
 # 该模块实现了 ResNet (Residual Network) 的骨干网络结构。
 # ResNet 通过引入残差学习单元来解决深度神经网络训练中的梯度消失和模型退化问题，
-# 使得构建非常深的网络成为可能。
+# 使得构建非常深的网络成为可能。允许网络层数更深，从而学习更复杂的特征。
 # 此处定义的 ResNetFace 类专门用作人脸特征提取器。
 
 import paddle
@@ -32,7 +32,8 @@ class ConvBNLayer(nn.Layer):
             groups (int, optional): 分组卷积的组数。默认为 1 (标准卷积)。
             padding (int or tuple or str, optional): 填充大小。可以是整数、元组或字符串（如 'SAME', 'VALID'）。
                                                  默认为 0 (无填充)。对于 filter_size=3, padding=1 通常用于保持特征图尺寸不变。
-            act (callable, optional): 激活函数。例如 `F.relu` 或 `F.sigmoid`。
+            act (callable, optional): 激活函数。例如 `F.relu` 或 `F.sigmoid`, `F.tanh`, `F.leaky_relu`, `F.elu`, `F.prelu`, `F.swish`, `F.mish`, etc.
+                                      详细介绍：https://www.paddlepaddle.org.cn/documentation/docs/zh/api/paddle/nn/Overview_cn.html
                                       如果为 `None`，则不应用激活函数。默认为 `None`。
         """
         super(ConvBNLayer, self).__init__()
@@ -46,9 +47,14 @@ class ConvBNLayer(nn.Layer):
             groups=groups,
             bias_attr=False  # 批归一化层会学习偏置，因此卷积层通常不使用偏置
         )
-        # 定义批归一化层
+        # 定义批归一化层: 就像在每一层神经网络的输入前进行一次“标准化考试”，确保输入数据的分布相对稳定。
+        #怎么做的？ 对一个批次的数据在每个通道上计算均值和方差，然后用这些统计量对数据进行标准化，使其均值为 0，方差为 1。
+        # 作用: 非常重要！ 加速训练的收敛速度，允许使用更大的学习率，并对网络参数的初始化不那么敏感，同时也有一定的正则化效果，防止过拟合。
         self.bn = nn.BatchNorm2D(ch_out)
-        # 激活函数
+
+        # 激活函数: 在卷积和批归一化之后，应用激活函数，增加网络的非线性表达能力。
+        # 作用: 增加网络的非线性表达能力，使得网络可以学习更复杂的特征。
+        # 常见的激活函数: ReLU, Sigmoid, Tanh, LeakyReLU, ELU, PReLU, SwiGLU, Mish, etc.
         self.act = act
 
     def forward(self, x: paddle.Tensor) -> paddle.Tensor:
@@ -111,6 +117,7 @@ class BasicBlock(nn.Layer):
 
     对应于ResNet论文中较浅层网络（如ResNet-18, ResNet-34）使用的残差单元。
     它主要由两个3x3的卷积层组成。
+
     """
     expansion = 1 # 对于BasicBlock，输入通道数等于输出通道数（在块内部），因此扩展因子为1。
 
@@ -152,26 +159,77 @@ class BasicBlock(nn.Layer):
 
     def forward(self, x: paddle.Tensor) -> paddle.Tensor:
         """前向传播过程。"""
-        identity = x  # 保存输入，作为残差连接的恒等路径
+        identity = x  # 保存输入，作为残差连接的恒等路径（捷径）
 
         # 主路径的卷积变换
         out = self.conv1(x)
         # F.relu(out) # conv1内部已带relu
         out = self.conv2(out)
 
-        # 处理残差连接
+        # 处理残差连接：作用: 解决了训练非常深的神经网络时梯度消失和模型退化的问题。 允许网络层数更深，从而学习更复杂的特征。
         if self.shortcut is not None:
             identity = self.shortcut(x) # 如果需要，对恒等路径进行维度调整
 
         # 将主路径输出与shortcut路径输出相加
-        out = out + identity
-        # 在相加之后应用ReLU激活函数
+        # 残差连接（Shortcut Connection）：
+        # 作用: 解决了训练非常深的神经网络时梯度消失和模型退化的问题。 允许网络层数更深，从而学习更复杂的特征。
+        # 比喻: 就像给网络添加了一条“捷径”，当信息流经这条捷径时，它可以直接跳过一些层，从而减少信息在网络中传递的距离。
+        # 具体实现: 在每个残差块中，除了主路径的卷积操作外，还有一个额外的“shortcut”路径，它将输入直接传递给输出，不经过任何卷积操作。
+        out = out + identity  # 这里就是残差连接，将原始输入加到处理后的输出上。
+       
+        # 对卷积+BN 后的结果应用激活函数
         out = F.relu(out)
         return out
 
 # 注意: BottleneckBlock (用于ResNet-50/101/152) 在此文件中未实现。
 # 如果需要更深的网络，可以类似地定义BottleneckBlock，它使用1x1, 3x3, 1x1的卷积序列，
 # 并且通常有 expansion = 4。
+
+class BottleneckBlock(nn.Layer):
+    expansion = 4 # Bottleneck 块的输出通道数通常是中间 3x3 卷积通道数的 4 倍
+
+    def __init__(self, ch_in, ch_out, stride, shortcut):
+        super().__init__()
+        # Bottleneck 的第一层：1x1 卷积，用于降维
+        # ch_out 是 Bottleneck 块的“基础”输出通道数，中间层的通道数是 ch_out
+        # 真实的输出通道数是 ch_out * self.expansion
+        self.conv1 = ConvBNLayer(
+            ch_in=ch_in, ch_out=ch_out, filter_size=1, stride=1, act=nn.ReLU
+        )
+        # Bottleneck 的第二层：3x3 卷积，处理降维后的特征
+        self.conv2 = ConvBNLayer(
+            ch_in=ch_out, ch_out=ch_out, filter_size=3, stride=stride, padding=1, act=nn.ReLU
+        )
+        # Bottleneck 的第三层：1x1 卷积，用于升维
+        self.conv3 = ConvBNLayer(
+            ch_in=ch_out, ch_out=ch_out * self.expansion, filter_size=1, stride=1, act=None # 第三层卷积后不立即激活
+        )
+
+        # shortcut: 如果需要匹配维度，通常也使用 1x1 卷积
+        # 这里的 shortcut 目标维度是 Bottleneck 块的总输出通道数
+        if shortcut:
+            self.short = ConvBNLayer(
+                ch_in=ch_in, ch_out=ch_out * self.expansion, filter_size=1, stride=stride, act=None # shortcut 路径没有激活函数
+            )
+        self.shortcut = shortcut
+        self._num_channels = ch_out * self.expansion # 块的真实输出通道数
+
+    def forward(self, x):
+        identity = x # 保存原始输入
+
+        out = self.conv1(x) # 1x1 降维 + BN + ReLU
+        out = self.conv2(out) # 3x3 卷积 + BN + ReLU
+        out = self.conv3(out) # 1x1 升维 + BN
+
+        if self.shortcut:
+            identity = self.short(x) # 如果需要，匹配维度
+
+        out += identity # 残差连接
+
+        out = F.relu(out) # 最后再进行 ReLU 激活
+        return out
+
+
 
 class ResNetFace(nn.Layer):
     """基于ResNet架构的人脸特征提取器。
@@ -202,7 +260,15 @@ class ResNetFace(nn.Layer):
         """
         super(ResNetFace, self).__init__(name)
         self.feature_dim = feature_dim
-        block_type = BasicBlock # 当前只使用BasicBlock
+
+        # 选择使用哪种残差块类型
+        # 如果nf=32, 使用BasicBlock
+        # 如果nf=64, 使用BottleneckBlock
+        if nf == 32:
+            block_type = BasicBlock
+        else:
+            block_type = BottleneckBlock
+
 
         # 初始卷积层：3通道输入 (RGB图像), nf通道输出
         # 通常包含一个较大的卷积核和步长，以快速降低空间分辨率并提取初步特征。
@@ -210,10 +276,14 @@ class ResNetFace(nn.Layer):
         self.conv1 = ConvBNLayer(
             ch_in=3,
             ch_out=nf,
-            filter_size=3, # 原论文中通常是7x7, stride=2
+            #卷积核（探测器）的大小。通常是 3 或 1。3x3 能看到局部邻域信息，1x1 主要用于跨通道的线性组合（降维或升维）。
+            filter_size=3, 
+            #stride=1 时输出特征图尺寸不变或根据 padding 变化；stride=2 时输出尺寸减半。用于下采样。
             stride=1,      # 如果这里stride=1, 第一次下采样将在第一个stage的第一个block中进行
-            padding=1,
-            act=F.relu
+            padding=1,     # 填充大小，在输入特征图边缘填充的像素数。可以是整数、元组或字符串（如 'SAME', 'VALID'）。
+            groups=1,      # 分组卷积的组数。默认为 1 (标准卷积)。将输入通道和输出通道分成组进行卷积，可以减少计算量。
+            # 如果groups=2，则输入通道和输出通道被分成2组，每组进行卷积。
+            act=F.relu      # 激活函数，在卷积和批归一化之后，应用激活函数，增加网络的非线性表达能力。
         )
         # 可选的初始池化层 (原ResNet在conv1后有MaxPool)
         # self.pool1 = nn.MaxPool2D(kernel_size=3, stride=2, padding=1)

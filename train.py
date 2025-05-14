@@ -28,6 +28,8 @@ from utils.lr_scheduler_factory import get_lr_scheduler # 导入学习率调度�
 import time # 用于计时
 import json # 用于保存元数据
 import subprocess # 用于获取 git hash
+from visualdl import LogWriter # <--- 新增：导入VisualDL
+import numpy as np # 用于创建dummy input
 
 def get_git_revision_hash() -> str:
     """获取当前 Git仓库的 HEAD commit hash (短格式)"""
@@ -41,6 +43,16 @@ def get_git_revision_hash() -> str:
     except Exception as e:
         print(f"警告: 获取 Git commit hash 失败: {e}")
         return "unknown"
+
+def create_logdir_name(config: ConfigObject, base_log_dir: str = "logs") -> str:
+    """根据配置和时间戳生成VisualDL的日志目录名。"""
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    # 从配置中获取模型和损失类型，如果不存在则使用 "unknown"
+    model_type = getattr(config, 'model_type', 'unknown_model')
+    loss_type = getattr(config, 'loss_type', 'unknown_loss')
+    
+    logdir_name = f"{base_log_dir}/{model_type}_{loss_type}_{timestamp}"
+    return logdir_name
 
 def train(config: ConfigObject, cmd_args: argparse.Namespace):
     """模型训练的主函数。
@@ -64,6 +76,18 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
     else:
         paddle.set_device('cpu')
         print("使用 CPU 进行训练")
+        
+    # --- 初始化 VisualDL LogWriter ---
+    # 日志根目录可以从配置中读取或硬编码
+    base_log_directory = config.get("visualdl_log_dir", "runs/face_recognition_logs") # 配置文件中可指定 visualdl_log_dir
+    if not os.path.exists(base_log_directory):
+        os.makedirs(base_log_directory)
+    
+    # 生成本次运行的特定日志目录名
+    current_logdir = create_logdir_name(config, base_log_dir=base_log_directory)
+    log_writer = LogWriter(logdir=current_logdir)
+    print(f"VisualDL 日志将保存到: {current_logdir}")
+    # ----------------------------------
         
     # 构建训练和测试数据列表文件的完整路径
     # 这些路径基于配置文件中的 data_dir (数据根目录) 和 class_name (数据集子目录名)。
@@ -368,7 +392,15 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
                 epoch_correct_samples += (predicted_labels == labels).sum().item()
             
             epoch_total_samples += labels.shape[0] # 更新已处理的样本总数
-            global_step += 1 # 全局训练步数增加
+            
+            # --- 使用 VisualDL 记录训练过程中的标量 ---
+            if global_step % config.get('visualdl_log_freq', config.log_interval) == 0: # visualdl_log_freq 可配置，默认为log_interval
+                if loss_value is not None:
+                    log_writer.add_scalar(tag="train/batch_loss", step=global_step, value=loss_value.item())
+                log_writer.add_scalar(tag="train/learning_rate", step=global_step, value=opt.get_lr())
+            # ------------------------------------------
+            
+            global_step += 1 # 全局训练步数增加 (确保它在此处更新)
             
             # 6. 定期打印训练日志
             if batch_id % config.log_interval == 0:
@@ -385,6 +417,11 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
         avg_epoch_train_loss = epoch_total_loss / epoch_total_samples if epoch_total_samples > 0 else 0
         avg_epoch_train_acc = epoch_correct_samples / epoch_total_samples if epoch_total_samples > 0 else 0
         print(f"Epoch {epoch_idx + 1} Training Summary: AvgLoss: {avg_epoch_train_loss:.4f}, AvgAcc: {avg_epoch_train_acc:.4f}")
+        
+        # --- 使用 VisualDL 记录 Epoch 级别的训练统计数据 ---
+        log_writer.add_scalar(tag="train/epoch_avg_loss", step=epoch_idx + 1, value=avg_epoch_train_loss)
+        log_writer.add_scalar(tag="train/epoch_avg_accuracy", step=epoch_idx + 1, value=avg_epoch_train_acc)
+        # ----------------------------------------------------
         
         # --- 在测试集上进行评估 (Validation/Testing after each epoch) ---
         # 设置模型为评估模式 (关闭dropout, batchnorm使用固定均值方差等)
@@ -418,6 +455,11 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
         current_eval_acc = eval_correct_samples / eval_total_samples if eval_total_samples > 0 else 0
         avg_eval_loss = eval_total_loss / eval_total_samples if eval_total_samples > 0 else float('inf')
         print(f"Epoch {epoch_idx + 1} Test Summary: Accuracy: {current_eval_acc:.4f}, AvgLoss: {avg_eval_loss:.4f}")
+
+        # --- 使用 VisualDL 记录 Epoch 级别的评估统计数据 ---
+        log_writer.add_scalar(tag="eval/epoch_avg_loss", step=epoch_idx + 1, value=avg_eval_loss)
+        log_writer.add_scalar(tag="eval/epoch_accuracy", step=epoch_idx + 1, value=current_eval_acc)
+        # ----------------------------------------------------
 
         # --- （如果是ReduceLROnPlateau）在每个epoch评估后，根据验证指标更新学习率 --- 
         if isinstance(lr_scheduler, paddle.optimizer.lr.ReduceOnPlateau):
@@ -518,6 +560,11 @@ def train(config: ConfigObject, cmd_args: argparse.Namespace):
     print(f"在测试集上的最佳准确率: {best_acc:.4f}")
     print(f"最终模型检查点位于: {checkpoint_path} (元数据: {checkpoint_meta_path})")
     print(f"性能最佳的模型位于: {best_model_path} (元数据: {best_model_meta_path})")
+
+    # --- 关闭 VisualDL LogWriter ---
+    log_writer.close()
+    print("VisualDL LogWriter 已关闭。")
+    # -----------------------------
 
 if __name__ == '__main__':
     # --- 命令行参数解析 --- 

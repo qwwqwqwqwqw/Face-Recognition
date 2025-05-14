@@ -36,15 +36,17 @@ def get_backbone(config_model_params: dict, model_type_str: str, image_size: int
     if model_type_str == 'vgg':
         # 从配置参数中获取VGG特有的参数
         dropout_rate = config_model_params.get('dropout_rate', 0.5) # VGG的dropout率，默认为0.5
-        # VGGBackbone的输出特征维度在内部通常是固定的 (例如512)，但允许通过配置指定以保持一致性
-        feature_dim_out = config_model_params.get('feature_dim', 512) # VGG输出特征维度，默认为512
+        # 从配置中获取 feature_dim，如果未指定，则默认为512
+        feature_dim_config = config_model_params.get('feature_dim', 512) 
         
-        backbone = VGGBackbone(dropout_rate=dropout_rate)
+        backbone = VGGBackbone(dropout_rate=dropout_rate, feature_out_dim=feature_dim_config) # 传递 feature_out_dim
+        feature_dim_out = feature_dim_config # 返回配置的特征维度
         # NOTE: 当前VGGBackbone内部的feature_out_layer输出固定为512维。
         # 如果配置中的feature_dim与此不一致，需要关注实际生效的是哪个。
         # 理想情况下，VGGBackbone也应能根据feature_dim参数调整其最终输出层。
         # 此处暂时以外部配置的feature_dim_out为准返回给调用者，但模型本身的输出层可能仍是固定的。
         # 确保配置的feature_dim与VGGBackbone的实际输出能力匹配非常重要。
+        # 更新：VGGBackbone 现已修改为接受 feature_out_dim 参数
 
     elif model_type_str == 'resnet':
         # 从配置参数中获取ResNet特有的参数

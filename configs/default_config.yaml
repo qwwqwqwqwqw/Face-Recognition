@@ -32,82 +32,127 @@ global_settings:
   resume: false                  # 是否从检查点恢复训练
   seed: 42                       # 随机种子，用于保证实验的可重复性
   data_dir: data                 # 数据集根目录
+  class_name: face               # 数据集类别名称
   model_save_dir: model          # 模型保存目录
-  epochs: 20                    # 默认训练总轮数 (这里设置全局轮数)
+  epochs: 1                    # 默认训练总轮数 (这里设置全局轮数)
   log_interval: 10               # 训练日志打印间隔 (steps)
   image_size: 112                # 输入模型图像尺寸 (高和宽相同)
   num_classes: 100               # 数据集中类别的数量 (根据实际数据集调整)
-  batch_size: 64                 # 训练批大小
+  batch_size: 64                 # 训练批大小：DataLoader 会将 batch_size 张图片打包成一个"批次"喂给模型。模型会同时处理这一个批次的图片。
+  #显存不足 (Out of Memory - OOM): 这是最常见需要调整 batch_size 的情况。如果训练过程中提示显存不足，说明一个批次的数据量太大了，需要减小 batch_size。
+  #训练稳定性: 增大 batch_size 可以使每个批次计算的梯度更接近整个数据集的真实梯度，从而使训练更稳定，收敛更快。但批次过大也可能导致模型收敛到次优解。
+  #计算效率: 在显存允许范围内，适当增大 batch_size 可以更有效地利用 GPU 的并行计算能力，加速训练。
+  #通常建议: 在显存允许的情况下，尽量使用较大的 batch_size。如果遇到 OOM，就减半，直到能正常运行。
   learning_rate: 0.1             # 默认初始学习率
-  optimizer_type: Momentum       # 默认优化器类型 (Momentum 或 AdamW)
+  optimizer_type: Momentum       # 默认优化器类型 (Momentum 或 AdamW)：不同的优化器有不同的参数更新策略。
+  #Momentum: 模拟物理惯性，有助于冲过局部最优解。需要配合 momentum 参数。
+  #AdamW: 自适应学习率，收敛速度快。需要配合 beta1, beta2, epsilon 参数。
   optimizer_params:              # 默认优化器参数
-    momentum: 0.9                # Momentum 参数
-    weight_decay: 0.0005         # 权重衰减
+    momentum: 0.9                # Momentum 参数， 通常设为 0.9 或 0.99。影响 Momentum 的"惯性"大小。
+    weight_decay: 0.0005         # 权重衰减，防止过拟合,值越大，正则化越强。通常设为 0.0001 或 0.0005。
     # AdamW 参数 (如果 optimizer_type 为 AdamW 时生效)
-    # beta1: 0.9
-    # beta2: 0.999
-    # epsilon: 1e-08
+    # beta1: 0.9                # AdamW 的第一个动量参数, 通常设为 0.9 或 0.99。
+    # beta2: 0.999              # AdamW 的第二个动量参数, 通常设为 0.999 或 0.9999。
+    # epsilon: 1e-08            # AdamW 的稳定参数，防止除以0。通常设为 1e-08 或 1e-07。
   lr_scheduler_type: StepDecay      # 默认学习率调度器类型 (StepDecay, MultiStepDecay, etc.)
-  lr_scheduler_params:           # 默认学习率调度器参数
+  lr_scheduler_params:           # 控制学习率的衰减策略。不同的策略和参数会显著影响训练的收敛速度和最终性能。
     stepdecay: # <--- 键名匹配工厂函数查找 (无下划线)
-      step_size: 30              # StepDecay 的步长
-      gamma: 0.1                 # StepDecay 的衰减因子
+      step_size: 30              # StepDecay 的步长：每隔多少个 Epoch 或 Step 降低学习率。
+      gamma: 0.1                 # StepDecay 的衰减因子，每次降低学习率时乘以的因子 (衰减率)。
+                                 #例如 0.1 表示降低为原来的十分之一。
     multistepdecay: # <--- 键名匹配工厂函数查找 (无下划线)
-      milestones: [30, 60, 90]   # MultiStepDecay 的里程碑
-      gamma: 0.1                 # MultiStepDecay 的衰减因子
+      milestones: [30, 60, 90]   # MultiStepDecay 的里程碑：在哪些 Epoch 或 Step 降低学习率。比 StepDecay 更灵活。
+      gamma: 0.1                 # MultiStepDecay 的衰减因子：每次降低学习率时乘以的因子。
     exponentialdecay: # <--- 键名匹配工厂函数查找 (无下划线)
       gamma: 0.9                 # ExponentialDecay 的衰减因子
     reduceonplateau: # <--- 键名匹配工厂函数查找 (无下划线)
-      mode: 'min'                # ReduceOnPlateau 模式 ('min' 或 'max')
-      factor: 0.1                # ReduceOnPlateau 衰减因子
-      patience: 10               # ReduceOnPlateau 耐心值
-      threshold: 0.0001          # ReduceOnPlateau 阈值
+      mode: 'min'                # 监控指标的方向 ('min' 监控损失下降，'max' 监控准确率上升)。
+      factor: 0.1                # 指标不再改善时，学习率乘以的衰减因子。
+      patience: 10               # ReduceOnPlateau 耐心值：指标不再改善时，等待多少个 Epoch 或 Step 后才降低学习率。
+                                 #指标持续多少个 Epoch 或 Step 没有改善就降低学习率。
+      threshold: 0.0001          # ReduceOnPlateau 阈值：指标不再改善的阈值：判断指标是否"改善"的阈值和模式。
       threshold_mode: 'rel'      # ReduceOnPlateau 阈值模式 ('rel' 或 'abs')
-      cooldown: 0                # ReduceOnPlateau 冷却周期
-      min_lr: 0                  # ReduceOnPlateau 最小学习率
+      cooldown: 0                # ReduceOnPlateau 冷却周期：降低学习率后，等待多少个 Epoch 或 Step 后才重新开始监控指标。
+      min_lr: 0                  # ReduceOnPlateau 学习率衰减到的最小值
       eps: 1e-08                 # ReduceOnPlateau eps
     cosineannealingdecay: # <--- 键名匹配工厂函数查找 (无下划线)
-      T_max: 100                 # CosineAnnealingDecay 的最大迭代次数 (通常设置为总epoch数)
-      eta_min: 0                 # CosineAnnealingDecay 的最小学习率
+      T_max: 100                 # CosineAnnealingDecay 的最大迭代次数 ：学习率从初始值衰减到最小值所需的总 Epoch 或 Step 数。通常设为总训练 Epoch 数。
+      eta_min: 0                 # CosineAnnealingDecay 的最小学习率：学习率衰减到最小值。
     polynomialdecay: # <--- 键名匹配工厂函数查找 (无下划线)
-      decay_steps: 100           # PolynomialDecay 的衰减步数
-      end_lr: 0                  # PolynomialDecay 的最终学习率
-      power: 1.0                 # PolynomialDecay 的多项式次方
-      cycle: False               # PolynomialDecay 是否循环
+      decay_steps: 100           # PolynomialDecay 学习率完成多项式衰减所需的总步数。建议设置为总 Epoch 数。
+      end_lr: 0                  # PolynomialDecay 的最终学习率：学习率衰减到最小值。
+      power: 1.0                 # PolynomialDecay 的多项式次方：控制衰减的速率。
+      cycle: False               # PolynomialDecay 是否周期性重复衰减。
     cosineannealingwarmrestarts: # <--- 键名匹配工厂函数查找 (无下划线)
       T_0: 10                    # CosineAnnealingWarmRestarts 的第一个周期的迭代次数 (通常是一个epoch的step数或总epoch数的一部分)
-      T_mult: 2                  # CosineAnnealingWarmRestarts 的周期长度乘数
-      eta_min: 0                 # CosineAnnealingWarmRestarts 的最小学习率
+      T_mult: 2                  # CosineAnnealingWarmRestarts 后续周期长度相对于前一个周期的乘数
+      eta_min: 0                 # CosineAnnealingWarmRestarts 的最小学习率：学习率衰减到最小值。
       # last_epoch: -1           # 如果从检查点恢复，需要根据当前epoch设置
     warmup:                      # 学习率预热设置
       use_warmup: True           # 是否使用预热
       warmup_steps: 500          # 预热的步数
       start_lr: 0.001            # 预热开始时的学习率
+      #在预热阶段，学习率会从 start_lr 线性增加到 initial_learning_rate。这有助于模型在训练初期稳定。
 
   model_type: resnet             # 默认模型骨干类型 (vgg 或 resnet)
+  # VGG: 结构简单，参数少，计算量小，但性能相对较差。
+  # ResNet: 结构复杂，参数多，计算量大，但性能更好。
+  # 在选择模型时，需要权衡模型的复杂度和性能。
+  #如果想尝试不同 VGG 变体，需要修改代码或扩展配置加载逻辑。
   model:                         # 默认模型参数
     vgg_params:
-      dropout_rate: 0.5          # VGG Dropout 率
+      dropout_rate: 0.5          # VGG Dropout 率，一种正则化手段，防止过拟合。
+      feature_dim: 512           # VGG 输出特征维度 (新添加)，决定了骨干网络最终输出的特征向量的长度。
+#训练时随机"关闭"一部分神经元，迫使其他神经元学习更鲁棒的特征。
+#值越大，正则化越强。通常设为 0.5 或 0.25。
     resnet_params:
-      feature_dim: 512           # ResNet 输出特征维度
-      nf: 32                     # ResNet 初始特征通道数的乘子
+      feature_dim: 512           # ResNet 输出特征维度，重要参数。 骨干网络最终输出的特征向量的长度。
+#增大 feature_dim: 特征向量能编码更多信息，可能提高模型区分度，但会增加头部和后续计算的参数量和计算量。
+#常见的维度是 128, 256, 512。
+#减小 feature_dim: 减少模型复杂度和计算量，但可能丢失重要信息，影响准确率。
+      nf: 32                     # 控制 ResNet 早期层的通道数，影响模型容量。
+#增大 nf: 增加初始特征通道数，可以提高模型容量，但会增加计算量。
+#常见的乘子是 16, 32, 64。
       n_resnet_blocks: 3         # ResNet block 的数量 (不包含stem和最后的avgpool)
+#增大 n_resnet_blocks: 增加网络深度#(ResNet 块数量): 控制 ResNet 的深度，影响模型容量和计算量。
+#常见的数量是 2, 3, 4。
+
+#nf 和 n_resnet_blocks 都是影响 ResNet 模型大小和能力的参数，调整它们可以改变模型的复杂度和表达能力。
 
   loss_type: arcface             # 默认损失/头部类型 (cross_entropy 或 arcface)
+  #(cross_entropy 或 arcface) 非常重要参数。 
+  #决定了模型的训练目标和验收方案（分类还是相似度）。
   loss:                          # 默认损失/头部参数
     cross_entropy_params: {}     # CrossEntropy 不需要额外参数
-    arcface_params:
+    arcface_params:              #arcface_params: 非常重要参数 (针对 ArcFace)。 控制 ArcFace Loss 的行为。
+    #arcface_m1, arcface_m2, arcface_m3: 控制角度间隔 (Margin)。
+    #m2 是最重要的角度间隔参数。
+    #增大 m2: 强制类间距离更大，训练难度增加，可能提高判别性，但也更容易不收敛。
+    #需要结合 learning_rate 和 s 进行调整。
       arcface_m1: 1.0            # ArcFace m1 参数
       arcface_m2: 0.5            # ArcFace m2 参数
       arcface_m3: 0.0            # ArcFace m3 参数
-      arcface_s: 64.0            # ArcFace s 参数
+      arcface_s: 64.0            #  (尺度因子 Scale): 缩放余弦相似度，拉大区分度。
+      #增大 s: 同样增加训练难度，可能提高判别性。过大可能导致梯度爆炸。增加不收敛风险。
+      #需要结合 learning_rate 和 m2 进行调整。
+      #通常在 Loss 曲线稳定下降的前提下，尝试增大 m2 和 s 来提升特征的判别能力。
 
   dataset_params:                # 数据集相关参数
     train_list: trainer.list     # 训练列表文件
     eval_list: test.list         # 评估列表文件
+    acceptance_list: acceptance.list # 新增：验收集列表文件
     num_workers: 8               # 数据加载器 worker 数量 (Windows下建议设为0)
+
+    #最严谨的做法是计算您整个训练数据集的均值和标准差。
+    #但是，对于常见的图片数据集，使用一些通用的均值和标准差
+    #（比如 [0.5, 0.5, 0.5]，或者 ImageNet 数据集上计算的 [0.485, 0.456, 0.406] 和 [0.229, 0.224, 0.225]) 
+    #通常也能得到不错的结果，特别是如果您没有大量计算资源来精确计算。
+    #使用[0.5, 0.5, 0.5]，这意味着它将像素值从 [0, 255] 标准化到 [-1, 1] 的范围（先除以 255.0 变成 [0, 1]，再减去 0.5 变成 [-0.5, 0.5]，最后除以 0.5 变成 [-1, 1]）。这是一种常用的标准化方法。
     mean: [0.5, 0.5, 0.5]        # 图像标准化均值
     std: [0.5, 0.5, 0.5]        # 图像标准化标准差
+    # [0.5, 0.5, 0.5]（将数据范围标准化到 [-1, 1]）都是可以接受的起点。
+    #在实践中，如果您发现模型收敛困难或性能不佳，可以尝试更换为基于 ImageNet 的统计值，看看是否有改善。
+    #一旦确定了 mean 和 std，训练、建库、推理、对比时都必须保持一致！
 
   infer:                         # 推理相关参数
     face_library_path:           # 人脸库特征文件路径 (用于 ArcFace 推理和对比)

@@ -85,6 +85,12 @@ class ArcFaceHead(nn.Layer):
                                                 形状为 `[batch_size, out_features]`。
                                                 可用于计算训练过程中的准确率或其他评估指标。
         """
+        #为什么要进行 L2 归一化？ L2 归一化会将向量缩放到单位长度（向量的欧几里得范数等于 1）。
+        # 这样做的目的是让特征向量和类别中心点的点积直接等于它们之间夹角的余弦值 (Cosine Similarity)。 
+        # A · B = ||A|| ||B|| cos(theta)。如果 ||A||=1 且 ||B||=1，那么 A · B = cos(theta)。
+        #在人脸识别中，我们更关心特征的方向（也就是余弦相似度，代表两个脸有多“像”），而不是特征的长度。
+        # L2 归一化消除了特征长度的影响，让模型专注于学习如何让同类特征的方向更一致。
+       
         # 1. 对输入特征进行 L2 归一化 (沿特征维度)
         features_norm = F.normalize(features, p=2, axis=1)
 
@@ -95,10 +101,21 @@ class ArcFaceHead(nn.Layer):
         #   features_norm: [batch_size, in_features]
         #   weight_norm:   [in_features, out_features]
         #   cosine_logits: [batch_size, out_features]
+        #余弦相似度: 计算归一化后的特征 features 和归一化后的权重 self.weight 之间的点积。
+        # 这是通过矩阵乘法实现的，矩阵乘法的结果是一个新的矩阵，其中每个元素是两个向量的点积。
+        # 结果矩阵的形状为 [batch_size, out_features]，每个元素表示特征向量与对应类别中心点之间的余弦相似度。   
         cosine_logits = paddle.matmul(features_norm, weight_norm)
 
         # 4. 使用 paddle.nn.functional.margin_cross_entropy 计算最终损失和softmax输出
         #    该函数内部会处理角度边距的应用和softmax计算。
+
+
+        #ArcFace 魔法 (角度间隔和缩放)
+            #margin2 (m2) 就是重要的角度间隔 (Angular Margin)。 它直接操作余弦相似度对应的角度。
+            #对于正确类别对应的余弦相似度 cos(theta)，它会在角度 theta 上加上一个间隔 m2，然后计算 cos(theta + m2)。
+        
+        # 这使得模型在训练时更关注特征的方向，而不是它们的绝对大小。
+        # 通过这种方式，模型可以更好地学习到类内特征的紧凑性和类间特征的分离性。
         loss, softmax_output = F.margin_cross_entropy(
             logits=cosine_logits,       # 输入的余弦相似度
             label=label,                # 真实标签
