@@ -1,0 +1,147 @@
+{
+    "model_path": "logs/vgg__arcface__CosineAnnealingDecay/20250516-001506/checkpoints/best_model_vgg_arcface_cosine_config.pdparams",
+    "timestamp": "2025-05-16 00:18:18",
+    "total_samples": 60,
+    "correct_samples": 60,
+    "average_loss": 0.17130059003829956,
+    "accuracy": 1.0,
+    "config_used_for_eval": {
+        "use_gpu": true,
+        "resume": false,
+        "seed": 42,
+        "data_dir": "data",
+        "class_name": "face",
+        "model_save_dir": "model",
+        "epochs": 20,
+        "log_train_image_interval": 5,
+        "log_eval_image_interval": 5,
+        "log_histogram_interval": 2,
+        "log_interval": 10,
+        "image_size": 64,
+        "num_classes": 6,
+        "batch_size": 64,
+        "learning_rate": 0.1,
+        "optimizer_type": "AdamW",
+        "optimizer_params": {
+            "momentum": 0.9,
+            "weight_decay": 0.0005
+        },
+        "lr_scheduler_type": "StepDecay",
+        "lr_scheduler_params": {
+            "stepdecay": {
+                "step_size": 30,
+                "gamma": 0.1
+            },
+            "multistepdecay": {
+                "milestones": [
+                    30,
+                    60,
+                    90
+                ],
+                "gamma": 0.1
+            },
+            "exponentialdecay": {
+                "gamma": 0.9
+            },
+            "reduceonplateau": {
+                "mode": "min",
+                "factor": 0.1,
+                "patience": 10,
+                "threshold": 0.0001,
+                "threshold_mode": "rel",
+                "cooldown": 0,
+                "min_lr": 0,
+                "eps": "1e-08"
+            },
+            "cosineannealingdecay": {
+                "T_max": 100,
+                "eta_min": 0
+            },
+            "polynomialdecay": {
+                "decay_steps": 100,
+                "end_lr": 0,
+                "power": 1.0,
+                "cycle": false
+            },
+            "cosineannealingwarmrestarts": {
+                "T_0": 10,
+                "T_mult": 2,
+                "eta_min": 0
+            },
+            "warmup": {
+                "use_warmup": true,
+                "warmup_steps": 500,
+                "start_lr": 0.001
+            }
+        },
+        "model_type": "vgg",
+        "model": {
+            "vgg_params": {
+                "dropout_rate": 0.5,
+                "feature_dim": 512
+            },
+            "resnet_params": {
+                "feature_dim": 512,
+                "nf": 32,
+                "n_resnet_blocks": 3
+            }
+        },
+        "loss_type": "cross_entropy",
+        "loss": {
+            "cross_entropy_params": {},
+            "arcface_params": {
+                "arcface_m1": 1.0,
+                "arcface_m2": 0.5,
+                "arcface_m3": 0.0,
+                "arcface_s": 64.0
+            }
+        },
+        "dataset_params": {
+            "train_list": "trainer.list",
+            "eval_list": "test.list",
+            "acceptance_list": "acceptance.list",
+            "num_workers": 8,
+            "mean": [
+                0.5,
+                0.5,
+                0.5
+            ],
+            "std": [
+                0.5,
+                0.5,
+                0.5
+            ]
+        },
+        "infer": {
+            "face_library_path": null,
+            "recognition_threshold": 0.0,
+            "label_file": "readme.json",
+            "infer_visualize": true
+        },
+        "compare": {
+            "compare_threshold": 0.8,
+            "compare_visualize": true
+        },
+        "create_library": {
+            "output_library_path": null
+        },
+        "trained_model_path": "logs/vgg__arcface__CosineAnnealingDecay/20250516-001506/checkpoints/best_model_vgg_arcface_cosine_config.pdparams",
+        "results_save_dir": null
+    },
+    "model_config_snapshot": {
+        "model_type": "vgg",
+        "loss_type": "arcface",
+        "num_classes": 6,
+        "image_size": 64,
+        "model_specific_params": {
+            "dropout_rate": 0.5,
+            "feature_dim": 512
+        },
+        "loss_specific_params": {
+            "arcface_m1": 1.0,
+            "arcface_m2": 0.5,
+            "arcface_m3": 0.0,
+            "arcface_s": 64.0
+        }
+    }
+}

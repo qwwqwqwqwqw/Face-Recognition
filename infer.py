@@ -24,9 +24,7 @@ import cv2
 import argparse
 import numpy as np
 import paddle
-# import paddle.nn as nn # 已通过 heads.py 引入或不再直接需要
-# from vgg import VGGFace         # 导入VGG模型 # 已移除
-# from resnet_new import ResNetFace, ArcFaceHead # 导入新版ResNet模型和ArcFaceHead # 已移除
+import paddle.nn.functional as F
 import json # 用于加载标签映射文件 (readme.json)
 import matplotlib
 matplotlib.use('Agg') # 切换到非交互式后端，防止在无GUI服务器上出错
@@ -34,64 +32,13 @@ import matplotlib.pyplot as plt
 import pickle # 用于加载ArcFace模型所需的人脸特征库 (.pkl文件)
 from config_utils import load_config, ConfigObject # 导入配置加载工具和配置对象类型
 from model_factory import get_backbone, get_head # 导入模型构建的工厂函数
-from heads import create_head # 导入头部模块构建函数
+from model_factory import get_backbone, get_head   # 导入模型工厂函数
+from utils.image_processing import process_image_local # 从共享模块导入
 
-def process_image_local(img_path: str, target_size: int = 64, 
-                        mean_rgb: list[float] = [0.485, 0.456, 0.406], 
-                        std_rgb: list[float] = [0.229, 0.224, 0.225]) -> np.ndarray:
-    """
-    对单张输入图像进行预处理，为模型推理做准备。
-
-    处理步骤包括：
-    1. 使用OpenCV加载图像。
-    2. 将图像缩放到指定的目标尺寸 `target_size` (正方形)。
-    3. 将图像从BGR颜色空间转换为RGB颜色空间。
-    4. 将像素值从 [0, 255] 归一化到 [0, 1]范围。
-    5. 进行标准化处理：(pixel - mean) / std，使用给定的RGB均值和标准差。
-    6. 将图像数据格式从HWC（高x宽x通道）转换为CHW（通道x高x宽）。
-    7. 在最前面增加一个批次维度 (batch_size=1)，最终形状为 (1, C, H, W)。
-
-    Args:
-        img_path (str): 输入图像的文件路径。
-        target_size (int, optional): 图像将被缩放到的目标正方形尺寸 (高度和宽度相同)。
-                                   默认为 64。
-        mean_rgb (list[float], optional): RGB三通道的均值，用于标准化。长度应为3。
-                                        默认为 [0.485, 0.456, 0.406] (ImageNet常用均值)。
-        std_rgb (list[float], optional): RGB三通道的标准差，用于标准化。长度应为3。
-                                       默认为 [0.229, 0.224, 0.225] (ImageNet常用标准差)。
-
-    Returns:
-        np.ndarray: 预处理后的图像数据，numpy数组，数据类型为 float32，
-                    形状为 (1, 3, target_size, target_size)，可以直接作为模型输入。
-
-    Raises:
-        FileNotFoundError: 如果指定的 `img_path` 文件不存在或无法读取。
-        Exception: 如果图像处理过程中发生其他错误。
-    """
-    img = cv2.imread(img_path)
-    if img is None:
-        raise FileNotFoundError(f"错误: 无法读取图像文件 {img_path}。请检查路径或文件是否损坏。")
-    
-    # 缩放图像到目标尺寸
-    img_resized = cv2.resize(img, (target_size, target_size))
-    # BGR -> RGB
-    img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-    # 归一化到 [0, 1]
-    img_normalized_01 = img_rgb.astype('float32') / 255.0
-    
-    # 标准化 (减均值，除以标准差)
-    # 将均值和标准差列表转换为numpy数组，并调整形状以匹配图像的通道维度
-    mean_np = np.array(mean_rgb, dtype='float32').reshape((1, 1, 3))
-    std_np = np.array(std_rgb, dtype='float32').reshape((1, 1, 3))
-    img_standardized_hwc = (img_normalized_01 - mean_np) / std_np
-    
-    # HWC -> CHW (PaddlePaddle期望的输入格式)
-    img_chw = img_standardized_hwc.transpose((2, 0, 1)) # (H,W,C) -> (C,H,W)
-    
-    # 增加批次维度 (batch_size=1)
-    img_batch = np.expand_dims(img_chw, axis=0) # (C,H,W) -> (1,C,H,W)
-    
-    return img_batch.astype('float32') # 确保最终是float32类型
+# 全局变量，用于保存加载的标签映射，避免重复读取文件
+loaded_label_map = None
+# 全局变量，用于保存加载的人脸库特征，避免重复加载和计算
+loaded_face_library_features = None
 
 def compute_similarity(feature_vec1: np.ndarray, feature_vec2: np.ndarray) -> float:
     """计算两个一维特征向量之间的余弦相似度。
@@ -122,378 +69,374 @@ def compute_similarity(feature_vec1: np.ndarray, feature_vec2: np.ndarray) -> fl
     similarity = np.dot(f1, f2) / (norm_f1 * norm_f2)
     return float(similarity) # 确保返回的是标准的float类型
 
-def infer(config: ConfigObject):
-    """执行人脸识别推理的核心函数。
-
-    根据提供的配置对象 `config` 进行单张图像的人脸识别。
-    支持ArcFace模型 (与特征库比对) 和CrossEntropy模型 (直接分类)。
-
-    Args:
-        config (ConfigObject): 包含所有推理所需参数的配置对象。
-                               关键参数包括 `model_path`, `image_path`, `use_gpu`，
-                               以及针对ArcFace的 `infer.face_library_path`, `infer.recognition_threshold`，
-                               和通用的 `infer.label_file`, `infer.infer_visualize`。
+def infer(config: ConfigObject, cmd_args: argparse.Namespace):
     """
-    # --- 1. 设置运行设备 --- 
-    if config.use_gpu and paddle.is_compiled_with_cuda():
-        paddle.set_device('gpu')
-        print("使用 GPU 进行推理")
-    else:
-        paddle.set_device('cpu')
-        print("使用 CPU 进行推理")
-    
-    # --- 2. 检查并加载模型文件 --- 
-    if not config.model_path or not os.path.exists(config.model_path):
-        print(f"错误: 找不到指定的模型文件路径 '{config.model_path}' 或路径未配置。请通过 --model_path 或配置文件提供。")
-        return
+    主推理函数，加载模型、标签和目标图片，进行预测。
+    """
+    # --- 设置设备 ---
+    use_gpu_flag = cmd_args.use_gpu if cmd_args.use_gpu is not None else config.use_gpu
+    use_gpu_flag = use_gpu_flag and paddle.is_compiled_with_cuda()
+    paddle.set_device('gpu' if use_gpu_flag else 'cpu')
+    print(f"使用 {'GPU' if use_gpu_flag else 'CPU'} 进行推理")
 
-    print(f"从模型文件 {config.model_path} 加载模型参数和配置...")
-    try:
-        state_dict_container = paddle.load(config.model_path)
-        if not isinstance(state_dict_container, dict):
-            print(f"错误: 模型文件 {config.model_path} 内容格式不正确，期望为字典。")
-            return
-    except Exception as e:
-        print(f"错误: 加载模型文件 {config.model_path} 失败: {e}")
-        return
+    # --- 确定模型权重路径 ---
+    model_weights_path = cmd_args.model_path or config.model_path
+    if not model_weights_path:
+        raise ValueError("错误: 必须通过 --model_path 或在配置文件中通过 model_path 指定模型权重文件路径。")
+    if not os.path.exists(model_weights_path):
+        raise FileNotFoundError(f"错误: 指定的模型权重文件未找到: {model_weights_path}")
+    
+    print(f"将从模型文件 {model_weights_path} 加载模型。")
 
-    # --- 3. 解析模型文件中保存的训练时配置 --- 
-    # 模型文件通常会保存训练时的配置，如模型类型、损失类型、图像大小等，用于正确恢复模型。
-    saved_model_config_dict = state_dict_container.get('config') # 新版检查点格式
-    if not saved_model_config_dict:
-        saved_model_config_dict = state_dict_container.get('args') # 兼容旧版检查点格式 (argparse.Namespace)
-        if saved_model_config_dict and not isinstance(saved_model_config_dict, dict):
-            saved_model_config_dict = vars(saved_model_config_dict) # 将Namespace转为字典
-    
-    if not saved_model_config_dict or not isinstance(saved_model_config_dict, dict):
-        print(f"错误: 模型文件 {config.model_path} 中缺少有效的训练配置信息 (未找到 'config' 或 'args' 键，或其值非字典)。")
-        print(f"  这对于正确实例化模型至关重要。请确保模型文件是本项目训练脚本生成的。")
-        return
-    
-    # 从保存的配置中获取模型类型、损失类型和类别数
-    # 提供默认值以处理旧模型或配置不全的情况，但最好是配置完整
-    model_type_from_saved_config = saved_model_config_dict.get('model_type', 'resnet') # 默认尝试resnet
-    loss_type_from_saved_config = saved_model_config_dict.get('loss_type', 'arcface') # 默认尝试arcface
-    num_classes_from_saved_config = saved_model_config_dict.get('num_classes')
+    # --- 尝试从模型元数据加载配置 ---
+    loaded_model_type = None
+    loaded_loss_type = None
+    loaded_image_size = None
+    loaded_num_classes = None
+    loaded_model_specific_params = {}
+    loaded_loss_specific_params = {}
 
-    # 确定推理时使用的图像尺寸：优先使用模型训练时的尺寸。
-    # 如果模型文件未保存，则尝试使用当前脚本配置中的，否则报错。
-    image_size_from_model_file = saved_model_config_dict.get('image_size')
-    effective_image_size = image_size_from_model_file # 优先使用模型自带的
-    
-    if hasattr(config, 'image_size') and config.image_size is not None: # 如果当前配置也指定了image_size
-        if effective_image_size is not None and config.image_size != effective_image_size:
-            print(f"警告: 当前配置的图像大小 ({config.image_size}) 与模型训练时的大小 ({effective_image_size}) 不一致。")
-            print(f"       将优先使用模型训练时的图像大小: {effective_image_size}")
-        elif effective_image_size is None:
-            effective_image_size = config.image_size # 模型没存，当前配置有，则用当前的
-            print(f"提示: 模型文件未记录图像大小，将使用当前配置的图像大小: {effective_image_size}")
+    metadata_path = model_weights_path.replace('.pdparams', '.json')
+    using_metadata_config = False
+    source_of_config = "Global infer.py Config"
+
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
             
-    if effective_image_size is None: # 两边都没有，则无法继续
-        print(f"错误: 无法确定推理时应使用的图像大小。模型配置和当前脚本配置中均未提供 'image_size'。")
-        return
-    print(f"推理时将使用图像大小: {effective_image_size}x{effective_image_size}")
+            temp_model_type = metadata.get('model_type')
+            temp_loss_type = metadata.get('loss_type')
+            temp_image_size = metadata.get('image_size')
+            temp_num_classes = metadata.get('num_classes')
+            temp_model_specific_params = metadata.get('model_specific_params')
+            temp_loss_specific_params = metadata.get('loss_specific_params')
 
-    # --- 4. 实例化骨干网络和头部模块 (使用工厂函数) --- 
-    # 获取骨干网络构建所需的参数，优先从模型文件中保存的配置里取
-    backbone_params_from_model_file = saved_model_config_dict.get('backbone_params', {}) 
-    # 兼容旧格式: model: { resnet_params: {...} }
-    if not backbone_params_from_model_file:
-        legacy_model_section = saved_model_config_dict.get('model', {})
-        if model_type_from_saved_config == 'vgg' and 'vgg_params' in legacy_model_section:
-            backbone_params_from_model_file = legacy_model_section['vgg_params']
-        elif model_type_from_saved_config == 'resnet' and 'resnet_params' in legacy_model_section:
-            backbone_params_from_model_file = legacy_model_section['resnet_params']
+            if all([temp_model_type, temp_loss_type, 
+                    temp_image_size is not None, temp_num_classes is not None,
+                    temp_model_specific_params is not None, temp_loss_specific_params is not None]):
+                loaded_model_type = temp_model_type
+                loaded_loss_type = temp_loss_type
+                loaded_image_size = temp_image_size
+                loaded_num_classes = temp_num_classes
+                loaded_model_specific_params = temp_model_specific_params if isinstance(temp_model_specific_params, dict) else {}
+                loaded_loss_specific_params = temp_loss_specific_params if isinstance(temp_loss_specific_params, dict) else {}
+                source_of_config = f"Metadata file ({metadata_path})"
+                print(f"已从元数据文件 {metadata_path} 加载完整配置。")
+                using_metadata_config = True
+            else:
+                print(f"警告: 模型元数据文件 {metadata_path} 中缺少部分关键配置项。")
+        except Exception as e:
+            print(f"警告: 加载或解析模型元数据文件 {metadata_path} 失败: {e}。")
+
+    if not using_metadata_config:
+        print(f"将使用 infer.py 的全局配置文件中的配置 (回退或元数据加载失败/不完整)。")
+        loaded_model_type = config.model_type
+        loaded_loss_type = config.loss_type
+        loaded_image_size = config.image_size
+        loaded_num_classes = config.num_classes
+        # 从全局配置加载详细参数
+        loaded_model_specific_params = config.model.get(f'{loaded_model_type}_params', {}).to_dict() \
+                                     if isinstance(config.model.get(f'{loaded_model_type}_params', {}), ConfigObject) \
+                                     else config.model.get(f'{loaded_model_type}_params', {})
+        loaded_loss_specific_params = config.loss.get(f'{loaded_loss_type}_params', {}).to_dict() \
+                                    if isinstance(config.loss.get(f'{loaded_loss_type}_params', {}), ConfigObject) \
+                                    else config.loss.get(f'{loaded_loss_type}_params', {})
+        source_of_config = "Global infer.py Config (fallback)"
+        if not all([loaded_model_type, loaded_loss_type, loaded_image_size is not None, loaded_num_classes is not None]):
+             raise ValueError("错误: 无法从全局配置中确定模型构建所需的核心配置。请检查 infer.py 的配置文件。")
     
-    if not backbone_params_from_model_file:
-        print(f"警告: 未在模型配置 '{config.model_path}' 中找到 '{model_type_from_saved_config}_params' 或兼容的旧格式参数。")
-        print(f"       骨干网络 ({model_type_from_saved_config.upper()}) 将尝试使用默认参数实例化，这可能导致错误或性能下降。")
+    print(f"--- 模型构建配置来源: {source_of_config} ---")
+    print(f"  Model Type: {loaded_model_type}")
+    print(f"  Loss Type: {loaded_loss_type}")
+    print(f"  Image Size: {loaded_image_size}")
+    print(f"  Num Classes: {loaded_num_classes}")
+    print(f"  Model Params: {loaded_model_specific_params}")
+    print(f"  Loss Params: {loaded_loss_specific_params}")
+    print("--------------------------------------------------")
 
-    backbone_instance, feature_dim_from_backbone = get_backbone(
-        config_model_params=backbone_params_from_model_file,
-        model_type_str=model_type_from_saved_config,
-        image_size=effective_image_size # 传递最终确定的图像尺寸
+    # --- 构建模型 ---
+    model_backbone, backbone_out_dim = get_backbone(
+        config_model_params=loaded_model_specific_params, 
+        model_type_str=loaded_model_type,
+        image_size=loaded_image_size
     )
-    if not backbone_instance:
-        print(f"错误: 实例化骨干网络 ({model_type_from_saved_config.upper()}) 失败。请检查模型类型和参数配置。")
-        return
-    print(f"骨干网络 ({model_type_from_saved_config.upper()}) 实例化成功，声明输出特征维度: {feature_dim_from_backbone}")
+    print(f"骨干网络 ({loaded_model_type.upper()}) 构建成功，期望输入图像尺寸: {loaded_image_size}, 输出特征维度: {backbone_out_dim}")
 
-    head_module_instance = None # 初始化为None
-    # 仅当损失类型为CrossEntropy时，才需要在推理时显式实例化和加载分类头。
-    # ArcFace模型的推理依赖于骨干网络提取特征后与特征库进行比对。
-    if loss_type_from_saved_config == 'cross_entropy':
-        if num_classes_from_saved_config is None:
-            print(f"错误: 模型配置中缺少 'num_classes'，无法为CrossEntropyLoss实例化头部模块。")
-            return
-        
-        # 获取头部构建参数，优先从模型文件中保存的配置里取
-        head_params_from_model_file = saved_model_config_dict.get('head_params', {})
-        # 兼容旧格式: loss: { cross_entropy_params: {...} } (通常CE头参数为空)
-        if not head_params_from_model_file:
-            legacy_loss_section = saved_model_config_dict.get('loss', {})
-            if 'cross_entropy_params' in legacy_loss_section:
-                 head_params_from_model_file = legacy_loss_section['cross_entropy_params']
-        
-        head_module_instance = get_head(
-            config_loss_params=head_params_from_model_file,
-            loss_type_str=loss_type_from_saved_config,
-            in_features=feature_dim_from_backbone, # 头部输入维度需与骨干输出匹配
-            num_classes=num_classes_from_saved_config
+    model_head = None
+    if loaded_loss_type == 'cross_entropy': 
+        model_head = get_head(
+            config_loss_params=loaded_loss_specific_params, 
+            loss_type_str=loaded_loss_type,
+            in_features=backbone_out_dim,
+            num_classes=loaded_num_classes
         )
-        if not head_module_instance:
-            print(f"错误: 实例化头部模块 ({loss_type_from_saved_config.upper()}) 失败。")
-            return
-        print(f"头部模块 ({loss_type_from_saved_config.upper()}) 实例化成功。")
-    elif loss_type_from_saved_config == 'arcface':
-        print(f"提示: 模型损失类型为 '{loss_type_from_saved_config.upper()}'。推理时将仅使用骨干网络提取特征，并与特征库比对。")
-        print(f"       不直接实例化 {loss_type_from_saved_config.upper()}Head 进行前向计算。")
+        print(f"头部模块 ({loaded_loss_type.upper()}) 构建成功，输入特征维度: {backbone_out_dim}, 输出类别数: {loaded_num_classes}")
 
-    # --- 5. 加载模型权重 --- 
-    weights_loaded_successfully = True
-    # 加载骨干网络权重
-    if 'backbone' in state_dict_container and backbone_instance:
-        try:
-            backbone_instance.set_state_dict(state_dict_container['backbone'])
-            print(f"{model_type_from_saved_config.upper()} 骨干网络权重从 'backbone' 键加载成功。")
-        except Exception as e:
-            print(f"错误: 加载骨干网络权重失败: {e}")
-            weights_loaded_successfully = False
-    # 兼容旧VGG模型文件，其骨干权重可能存储在 'model' 键下
-    elif model_type_from_saved_config == 'vgg' and 'model' in state_dict_container and backbone_instance:
-        try:
-            backbone_instance.set_state_dict(state_dict_container['model'])
-            print(f"VGG 骨干网络权重从旧的 'model' 键加载成功。")
-        except Exception as e:
-            print(f"错误: 加载VGG骨干网络权重 (从'model'键) 失败: {e}")
-            weights_loaded_successfully = False
-    elif backbone_instance: # 骨干网络已实例化，但模型文件中无对应权重
-        print(f"错误: 在模型文件 {config.model_path} 中未找到 'backbone' (或兼容的 'model' for VGG) 的骨干网络权重。")
-        weights_loaded_successfully = False
-
-    # 如果是CE模型且头部已实例化，则加载头部权重
-    if head_module_instance: 
-        if 'head' in state_dict_container:
-            try:
-                head_module_instance.set_state_dict(state_dict_container['head'])
-                print(f"头部模块 ({loss_type_from_saved_config.upper()}) 权重加载成功。")
-            except Exception as e:
-                print(f"错误: 加载头部模块 ({loss_type_from_saved_config.upper()}) 权重失败: {e}")
-                weights_loaded_successfully = False
+    # --- 加载模型权重 ---
+    if model_weights_path and os.path.exists(model_weights_path):
+        full_state_dict = paddle.load(model_weights_path)
+        
+        # 提取骨干网络权重
+        backbone_state_dict = {k.replace('backbone.', '', 1): v for k, v in full_state_dict.items() if k.startswith('backbone.')}
+        if backbone_state_dict:
+            model_backbone.set_state_dict(backbone_state_dict)
+            print(f"骨干网络权重从 {model_weights_path} 加载成功。")
         else:
-            # 对于推理，如果CE head权重未找到，分类结果将不可靠。但特征提取可能仍有用。
-            print(f"警告: 在模型文件 {config.model_path} 中未找到 'head' 的头部模块权重。")
-            print(f"       CrossEntropyHead ({loss_type_from_saved_config.upper()}) 将使用其初始权重，这可能导致错误的分类结果。")
-            # 视情况决定是否将 weights_loaded_successfully 设为 False。如果CE模型必须有头权重，则应设为False。
-            # 此处不设为False，但用户应非常注意此警告。
+            # 如果没有 'backbone.' 前缀，尝试直接加载整个 state_dict 到 backbone (可能模型只保存了骨干)
+            try:
+                model_backbone.set_state_dict(full_state_dict)
+                print(f"骨干网络权重 (可能为直接保存的骨干模型) 从 {model_weights_path} 加载成功。")
+            except Exception as e_direct_bb_load:
+                raise RuntimeError(f"错误: 在模型文件 {model_weights_path} 中未找到 'backbone.' 前缀的权重，并且直接加载整个状态字典到骨干网络失败: {e_direct_bb_load}。请确保模型文件与期望的结构一致。")
 
-    if not weights_loaded_successfully:
-        print("由于部分或全部模型权重加载失败，无法继续进行可靠的推理。请检查模型文件和配置。")
-        return
-        
-    # --- 6. 设置模型为评估模式 --- 
-    # 这会关闭Dropout层，并使BatchNorm层使用学习到的均值和方差，而不是当前批次的统计数据。
-    if backbone_instance: backbone_instance.eval()
-    if head_module_instance: head_module_instance.eval()
+        # 如果存在头部模型 (例如 CrossEntropy 模式)，则加载头部权重
+        if model_head:
+            head_state_dict = {k.replace('head.', '', 1): v for k, v in full_state_dict.items() if k.startswith('head.')}
+            if head_state_dict:
+                model_head.set_state_dict(head_state_dict)
+                print(f"头部模块 ({loaded_loss_type}) 权重从 {model_weights_path} 加载成功。")
+            else: # Head is instantiated, but no 'head.' prefixed weights found.
+                print(f"警告: 头部模块 ({loaded_loss_type}) 已实例化，但在模型文件 {model_weights_path} 中未找到 'head.' 前缀的权重。头部将使用其默认初始化权重。")
+        # If model_head is None (e.g., for ArcFace feature extraction path as currently coded in infer.py),
+        # no head loading is attempted, and no warnings about missing head weights are printed here.
 
-    # --- 7. 加载推理辅助文件 (标签映射、特征库) ---
-    # 从当前脚本的config对象中获取推理特定的配置 (通常在 infer: {...} 块下)
-    infer_specific_config = config.get('infer', {})
-    label_filename_from_config = infer_specific_config.get('label_file') # 现在期望 "readme.json"
-    face_library_file_path = infer_specific_config.get('face_library_path') # ArcFace模型所需
-    recognition_similarity_threshold = infer_specific_config.get('recognition_threshold', 0.5) # ArcFace识别阈值
-    should_visualize_output = infer_specific_config.get('infer_visualize', False) # 是否可视化结果
+        else:
+            raise FileNotFoundError(f"错误: 模型权重文件 {model_weights_path} 未找到或未指定。")
 
+    model_backbone.eval()
+    if model_head:
+        model_head.eval()
+
+    # --- 加载类别标签文件 ---
     label_file_path = None
-    if label_filename_from_config: # 检查是否提供了文件名
-        # 构建完整路径
-        label_file_path = os.path.join(config.data_dir, config.class_name, label_filename_from_config)
+    source_for_label_file = None
 
-    # 加载标签ID到名称的映射 (从 CreateDataList.py 生成的 readme.json)
-    label_id_to_name_map = {}
-    if not label_file_path or not os.path.exists(label_file_path):
-        actual_path_for_warning = label_file_path if label_file_path else f"(config.infer.label_file: '{label_filename_from_config}', config.data_dir: '{config.data_dir}', config.class_name: '{config.class_name}')"
-        print(f"警告: 未找到或无法访问标签文件。预期路径: '{actual_path_for_warning}'.")
-        print(f"       确保 config.infer.label_file (当前为 \"{label_filename_from_config}\") 已正确设置，并且文件存在于 {os.path.join(config.data_dir, config.class_name)} 目录下。")
-        print(f"       推理结果中将只显示类别ID，而不是具体的名称。")
-    else:
-        try:
-            with open(label_file_path, 'r', encoding='utf-8') as f_json:
-                label_metadata = json.load(f_json)
-                # readme.json 的结构通常是: { ..., "class_detail": [{"class_label":0, "class_name":"Alice"}, ...] }
-                for class_entry in label_metadata.get('class_detail', []):
-                    label_id = class_entry.get('class_label') 
-                    class_name = class_entry.get('class_name')
-                    if label_id is not None and class_name is not None:
-                         label_id_to_name_map[int(label_id)] = str(class_name) #确保ID是整数，name是字符串
-            if not label_id_to_name_map:
-                print(f"警告: 标签文件 {label_file_path} 解析后未得到有效的标签ID到名称的映射。请检查文件内容和格式。")
+    if cmd_args.label_file:
+        if os.path.isabs(cmd_args.label_file) and os.path.exists(cmd_args.label_file):
+            label_file_path = cmd_args.label_file
+            source_for_label_file = "command line (absolute)"
+        elif os.path.exists(cmd_args.label_file): # Relative path from CWD
+            label_file_path = cmd_args.label_file
+            source_for_label_file = "command line (relative to CWD)"
+        else: # Filename or non-existing relative path from cmd_args
+            # Attempt to resolve against dataset dir
+            if config.data_dir and config.class_name:
+                prospective_path = os.path.join(config.data_dir, config.class_name, cmd_args.label_file)
+                if os.path.exists(prospective_path):
+                    label_file_path = prospective_path
+                    source_for_label_file = "command line (resolved to dataset dir)"
+            if not label_file_path:
+                 print(f"警告: 命令行提供的标签文件路径 '{cmd_args.label_file}' 未找到。")
+
+
+    if not label_file_path and config.infer.get('label_file'):
+        config_label_file = config.infer.get('label_file')
+        if os.path.isabs(config_label_file) and os.path.exists(config_label_file):
+            label_file_path = config_label_file
+            source_for_label_file = "config file (absolute)"
+        elif os.path.exists(config_label_file): # Relative path from CWD
+            label_file_path = config_label_file
+            source_for_label_file = "config file (relative to CWD)"
+        else: # Filename or non-existing relative path
+             # Attempt to resolve against dataset dir
+            if config.data_dir and config.class_name:
+                prospective_path = os.path.join(config.data_dir, config.class_name, config_label_file)
+                if os.path.exists(prospective_path):
+                    label_file_path = prospective_path
+                    source_for_label_file = "config file (resolved to dataset dir)"
+            if not label_file_path:
+                print(f"警告: 配置文件中的标签文件路径 '{config_label_file}' 未找到。")
+
+    # Fallback: If still no valid path, try the default dataset location for "readme.json"
+    if not label_file_path:
+        if config.data_dir and config.class_name:
+            default_dataset_readme_path = os.path.join(config.data_dir, config.class_name, "readme.json")
+            if os.path.exists(default_dataset_readme_path):
+                label_file_path = default_dataset_readme_path
+                source_for_label_file = "default dataset location (readme.json)"
+                print(f"标签文件未在命令行或配置中明确找到，使用默认的数据集位置: {label_file_path}")
             else:
-                print(f"标签文件 {label_file_path} 加载成功，映射了 {len(label_id_to_name_map)} 个类别。")
-        except Exception as e:
-            print(f"错误: 读取或解析标签文件 {label_file_path} 失败: {e}")
-            # 即使标签文件加载失败，仍可继续推理，只是无法显示名称。
+                # Last resort: try the model experiment directory (less likely for CreateDataList's readme.json)
+                if model_weights_path:
+                    inferred_path_model_dir = os.path.join(os.path.dirname(os.path.dirname(model_weights_path)), "readme.json")
+                    if os.path.exists(inferred_path_model_dir):
+                        label_file_path = inferred_path_model_dir
+                        source_for_label_file = "model experiment directory (readme.json)"
+                        print(f"尝试从模型实验目录推断标签文件: {label_file_path}")
 
-    # 如果是ArcFace模型，则加载人脸特征库
-    face_feature_library = None
-    is_arcface_like_model = (loss_type_from_saved_config == 'arcface')
+
+    if not label_file_path:
+        raise FileNotFoundError("错误: 最终未能确定类别标签文件 (readme.json) 的有效路径。请通过 --label_file 指定或确保其在预期位置 (如 data/face/readme.json)。")
     
-    if is_arcface_like_model:
-        if not face_library_file_path or not os.path.exists(face_library_file_path):
-            print(f"错误: ArcFace类模型 ({model_type_from_saved_config.upper()}+{loss_type_from_saved_config.upper()}) 推理需要人脸特征库。")
-            print(f"       请通过配置文件中的 infer.face_library_path 提供有效的特征库文件路径 (当前: '{face_library_file_path}')。")
-            print(f"       特征库可使用 create_face_library.py脚本生成。")
-            return
-        try:
-            with open(face_library_file_path, 'rb') as f_lib_pickle:
-                face_feature_library = pickle.load(f_lib_pickle)
-            if not isinstance(face_feature_library, dict) or not face_feature_library:
-                print(f"错误: 人脸特征库文件 {face_library_file_path} 加载成功，但其内容不是预期的非空字典格式。请检查特征库文件。")
-                return
-            print(f"人脸特征库 {face_library_file_path} 加载成功，包含 {len(face_feature_library)} 个已知身份的特征。")
-        except Exception as e:
-            print(f"错误: 加载人脸特征库 {face_library_file_path} 失败: {e}")
-            return
-
-    # --- 8. 预处理输入图像 ---
-    if not config.image_path or not os.path.exists(config.image_path):
-        print(f"错误: 未提供有效的待识别图像路径 (当前配置 image_path: '{config.image_path}') 或文件不存在。")
-        return
+    print(f"最终用于加载的类别标签文件: {label_file_path} (来源: {source_for_label_file})")
     try:
-        # 使用之前确定的 effective_image_size 进行预处理
-        # 均值和标准差参数可以从config中读取，如果项目有特定值的话。此处使用ImageNet默认值。
-        # mean_rgb_config = config.dataset_params.get('mean', [0.485, 0.456, 0.406])
-        # std_rgb_config = config.dataset_params.get('std', [0.229, 0.224, 0.225])
-        preprocessed_image_np = process_image_local(
-            img_path=config.image_path, 
-            target_size=effective_image_size
-            # mean_rgb=mean_rgb_config, # 可选，如果需要自定义
-            # std_rgb=std_rgb_config    # 可选
-        )
-    except FileNotFoundError as e_file:
-        print(e_file); return
-    except Exception as e_proc:
-        print(f"处理输入图像 {config.image_path} 时发生错误: {e_proc}"); return
-        
-    # 将预处理后的numpy数组转换为Paddle张量
-    input_image_tensor = paddle.to_tensor(preprocessed_image_np)
+        with open(label_file_path, 'r', encoding='utf-8') as f:
+            # Assuming readme.json contains class_to_id_map
+            full_meta = json.load(f)
+            class_to_id_map = full_meta.get('class_to_id_map')
+            if class_to_id_map is None:
+                raise ValueError("readme.json 中未找到 'class_to_id_map'。")
+            id_to_class_map = {str(v): k for k, v in class_to_id_map.items()} # Invert for easy lookup
+        print(f"类别标签文件 {label_file_path} 加载成功 ({len(id_to_class_map)} 个类别)。")
+    except Exception as e:
+        raise RuntimeError(f"加载或解析类别标签文件 {label_file_path} 失败: {e}")
+
+    # --- 图像预处理 ---
+    target_image_path = cmd_args.image_path
+    if not target_image_path or not os.path.exists(target_image_path):
+        raise FileNotFoundError(f"错误: 输入图像 --image_path '{target_image_path}' 未指定或未找到。")
     
-    # --- 9. 执行模型推理 --- 
-    predicted_label_id = -1 # 默认为未知或错误
-    prediction_score = 0.0  # 对于CE是最高置信度，对于ArcFace是最高相似度
-    final_display_text_for_viz = "未知人物" # 用于可视化时显示的文本
+    # 使用从元数据或配置中加载的 image_size, mean, std
+    image_mean = config.dataset_params.mean # Assuming these are globally consistent for now
+    image_std = config.dataset_params.std
+    
+    preprocessed_image_np = process_image_local(
+        target_image_path, 
+        target_size=loaded_image_size,
+        mean_rgb=image_mean,
+        std_rgb=image_std
+    )
+    img_tensor = paddle.to_tensor(preprocessed_image_np)
 
-    print(f"\n开始对图像 '{config.image_path}' 执行推理，使用模型: '{config.model_path}' ({model_type_from_saved_config.upper()}+{loss_type_from_saved_config.upper()})...")
-    with paddle.no_grad(): # 推理时关闭梯度计算
-        # 9a. 提取输入图像的特征 (所有模型都需要这一步)
-        if not backbone_instance:
-            print("错误: 骨干网络未成功实例化或加载权重，无法进行特征提取。")
-            return
-        input_image_features_tensor = backbone_instance(input_image_tensor)
-        
-        # 9b. 根据模型类型进行后续的识别处理
-        if is_arcface_like_model: # ArcFace模型 (如 ResNet+ArcFace)
-            if face_feature_library is None: 
-                print("错误：ArcFace模型推理需要人脸特征库，但特征库未能成功加载。")
-                return 
-            
-            # 将提取到的特征张量转换为numpy数组，并展平为一维向量
-            input_image_features_np = input_image_features_tensor.numpy().flatten()
-            
-            best_match_label_from_lib = -1 # 初始化最佳匹配标签ID
-            highest_similarity_score = -1.0 # 初始化最高相似度
+    # --- 执行推理 ---
+    predicted_label_name = "未知"
+    confidence_or_similarity = 0.0
 
-            # 遍历特征库中的每一个已知身份及其平均特征向量
-            for known_label_id, known_feature_vector in face_feature_library.items():
-                current_similarity = compute_similarity(input_image_features_np, known_feature_vector)
-                if current_similarity > highest_similarity_score:
-                    highest_similarity_score = current_similarity
-                    best_match_label_from_lib = known_label_id # 更新为当前最相似的已知ID
-            
-            predicted_label_id = best_match_label_from_lib 
-            prediction_score = highest_similarity_score
-            print(f"特征比对完成。输入图像与特征库中各身份的最高相似度为: {prediction_score:.4f}")
+    with paddle.no_grad():
+        features = model_backbone(img_tensor)
 
-            # 结果解释 (ArcFace)
-            if predicted_label_id == -1 or prediction_score < recognition_similarity_threshold: 
-                predicted_label_id = -1 # 明确标记为未知
-                recognized_person_name = "未知人物"
-                final_display_text_for_viz = f"{recognized_person_name} (相似度 {prediction_score:.4f})"
-                print(f"  识别结果: {recognized_person_name}。最高相似度 {prediction_score:.4f} 低于阈值 {recognition_similarity_threshold} 或未匹配到任何库中身份。")
+        if loaded_loss_type == 'arcface':
+            print("ArcFace 推理模式: 提取特征并与人脸库比较...")
+            face_lib_path = None
+            source_for_face_lib = "未确定"
+            potential_paths_tried = []
+
+            # 1. 尝试从命令行参数获取
+            if cmd_args.face_library_path:
+                potential_paths_tried.append(f"Command Line (--face_library_path): '{cmd_args.face_library_path}'")
+                if os.path.isfile(cmd_args.face_library_path):
+                    face_lib_path = cmd_args.face_library_path
+                    source_for_face_lib = "Command Line"
+                else:
+                    print(f"  提示: 命令行提供的 --face_library_path '{cmd_args.face_library_path}' 不是一个有效的文件。")
+
+            # 2. 尝试从配置文件 (config.infer.face_library_path) 获取
+            if not face_lib_path and config.infer.get('face_library_path'):
+                config_lib_path_str = str(config.infer.face_library_path) # Ensure it's a string
+                potential_paths_tried.append(f"Config (infer.face_library_path): '{config_lib_path_str}'")
+                if os.path.isfile(config_lib_path_str):
+                    face_lib_path = config_lib_path_str
+                    source_for_face_lib = "Config File (infer.face_library_path)"
+                else:
+                    print(f"  提示: 配置文件提供的 infer.face_library_path '{config_lib_path_str}' 不是一个有效的文件。")
+            
+            # 3. 回退：尝试在模型权重文件所在目录查找
+            if not face_lib_path and model_weights_path:
+                # 确定预期的库文件名
+                # 优先使用 config.create_library.output_library_path (如果存在)
+                # 否则默认为 "face_library.pkl"
+                expected_lib_filename = "face_library.pkl"
+                if hasattr(config, 'create_library') and isinstance(config.create_library, ConfigObject) and config.create_library.get('output_library_path'):
+                    expected_lib_filename = config.create_library.get('output_library_path')
+                
+                default_path_near_model = os.path.join(os.path.dirname(model_weights_path), expected_lib_filename)
+                potential_paths_tried.append(f"Default (model directory + '{expected_lib_filename}'): '{default_path_near_model}'")
+                if os.path.isfile(default_path_near_model):
+                    face_lib_path = default_path_near_model
+                    source_for_face_lib = f"Default (model directory, found '{expected_lib_filename}')"
+                else:
+                    # 如果默认的 "face_library.pkl" 找不到，并且 expected_lib_filename 不是 "face_library.pkl"
+                    # 也尝试一下 "face_library.pkl" 以防万一 (例如配置指定了其他名字但实际是默认名保存的)
+                    if expected_lib_filename != "face_library.pkl":
+                        fallback_default_path = os.path.join(os.path.dirname(model_weights_path), "face_library.pkl")
+                        potential_paths_tried.append(f"Fallback Default (model directory + 'face_library.pkl'): '{fallback_default_path}'")
+                        if os.path.isfile(fallback_default_path):
+                             face_lib_path = fallback_default_path
+                             source_for_face_lib = "Fallback Default (model directory, found 'face_library.pkl')"
+            
+            if not face_lib_path:
+                 print(f"  未能成功加载人脸特征库。尝试过的特征库路径包括 (按优先级):")
+                 for i, p_path in enumerate(potential_paths_tried):
+                    print(f"    {i+1}. {p_path}")
+                 raise FileNotFoundError("错误: ArcFace模式需要人脸特征库 (.pkl)，但最终未能确定其有效路径。请通过 --face_library_path 指定，或确保其存在于预期的位置 (通常与模型文件同目录，名为 face_library.pkl 或由 create_library.output_library_path 定义)。")
+
+            print(f"最终用于加载的人脸库文件: {face_lib_path} (来源: {source_for_face_lib})")
+            try:
+                with open(face_lib_path, 'rb') as f:
+                    library_features, library_labels_ids = pickle.load(f)
+                print(f"人脸特征库 {face_lib_path} 加载成功 (包含 {library_features.shape[0]} 个特征)。")
+            except Exception as e:
+                raise RuntimeError(f"加载人脸特征库 {face_lib_path} 失败: {e}")
+
+            input_feature_vec = features.numpy().flatten()
+            similarities = np.dot(library_features, input_feature_vec) / (np.linalg.norm(library_features, axis=1) * np.linalg.norm(input_feature_vec))
+            
+            best_match_idx = np.argmax(similarities)
+            confidence_or_similarity = similarities[best_match_idx]
+            
+            recognition_thresh = cmd_args.recognition_threshold if cmd_args.recognition_threshold is not None else config.infer.get('recognition_threshold', 0.5)
+
+            if confidence_or_similarity >= recognition_thresh:
+                predicted_id = library_labels_ids[best_match_idx]
+                predicted_label_name = id_to_class_map.get(str(predicted_id), f"ID_{predicted_id}_未知")
             else:
-                recognized_person_name = label_id_to_name_map.get(predicted_label_id, f"标签ID_{predicted_label_id}")
-                final_display_text_for_viz = f"{recognized_person_name} (相似度 {prediction_score:.4f})"
-                print(f"  预测身份: {recognized_person_name} (标签ID: {predicted_label_id}), 最高相似度: {prediction_score:.4f}")
+                predicted_label_name = "图库外人员 (低于阈值)"
+            print(f"输入: {target_image_path}, 预测: {predicted_label_name}, 余弦相似度: {confidence_or_similarity:.4f}, 阈值: {recognition_thresh}")
 
-        else: # CrossEntropy模型 (如 ResNet+CrossEntropy, VGG+CrossEntropy)
-            if head_module_instance is None:
-                print(f"错误: CrossEntropy模型 ({model_type_from_saved_config.upper()}+{loss_type_from_saved_config.upper()}) 推理需要分类头 (head_module)，但该模块未成功加载或初始化。")
-                return
+        elif loaded_loss_type == 'cross_entropy':
+            print("CrossEntropy 推理模式: 进行分类...")
+            if not model_head:
+                raise RuntimeError("错误: CrossEntropy模式下模型头部 (model_head) 未正确初始化。")
             
-            # CrossEntropyHead的forward方法在 label=None 时应返回 (None, logits)
-            _, output_logits = head_module_instance(input_image_features_tensor, label=None) 
+            _, logits = model_head(features) # CrossEntropyHead 返回 (loss, logits)
+            probabilities = paddle.nn.functional.softmax(logits, axis=1)
             
-            if output_logits is None:
-                print(f"错误: 从 {loss_type_from_saved_config.upper()} 头部获取分类 Logits 失败。")
-                return
+            confidence_or_similarity = float(paddle.max(probabilities, axis=1).numpy()[0])
+            predicted_id = int(paddle.argmax(probabilities, axis=1).numpy()[0])
+            predicted_label_name = id_to_class_map.get(str(predicted_id), f"ID_{predicted_id}_未知")
+            print(f"输入: {target_image_path}, 预测: {predicted_label_name}, 置信度: {confidence_or_similarity:.4f}")
+        
+        else:
+            raise ValueError(f"不支持的推理模式 (基于loss_type): {loaded_loss_type}")
 
-            # 对Logits应用Softmax得到概率分布，然后取概率最高的类别及其概率值
-            output_probabilities_tensor = paddle.nn.functional.softmax(output_logits, axis=1)
-            output_probabilities_np = output_probabilities_tensor.numpy()
-            
-            predicted_label_id = np.argmax(output_probabilities_np[0])  # 取第一个样本 (batch_size=1) 的最高概率索引
-            prediction_score = output_probabilities_np[0][predicted_label_id] # 最高概率值 (置信度)
-            print(f"分类计算完成。")
-            
-            # 结果解释 (CrossEntropy)
-            recognized_person_name = label_id_to_name_map.get(predicted_label_id, f"标签ID_{predicted_label_id}")
-            final_display_text_for_viz = f"{recognized_person_name} (置信度 {prediction_score:.4f})"
-            print(f"  预测身份: {recognized_person_name} (标签ID: {predicted_label_id}), 置信度: {prediction_score:.4f}")
-    
-    # 检查预测的ID是否在标签映射中，如果不在，给出提示
-    if predicted_label_id != -1 and predicted_label_id not in label_id_to_name_map and label_file_path and os.path.exists(label_file_path):
-        print(f"提示: 预测的类别ID '{predicted_label_id}' 在标签文件 '{label_file_path}' 中找不到对应的名称。")
-    
-    # --- 10. 可视化结果 (如果配置启用) --- 
-    if should_visualize_output:
-        print(f"正在生成可视化结果图像...")
+    # --- 可视化结果 ---
+    should_visualize = cmd_args.infer_visualize if cmd_args.infer_visualize is not None else config.infer.get('infer_visualize', True)
+    if should_visualize:
         try:
-            original_image_for_display = cv2.imread(config.image_path)
-            if original_image_for_display is None: 
-                print(f"警告: 无法重新读取图像 {config.image_path} 进行可视化。跳过可视化。")
-                return 
+            img_display = cv2.imread(target_image_path)
+            text_to_display = f"{predicted_label_name} ({confidence_or_similarity:.2f})"
             
-            # 将OpenCV的BGR图像转换为RGB，以便matplotlib正确显示颜色
-            image_rgb_for_display = cv2.cvtColor(original_image_for_display, cv2.COLOR_BGR2RGB)
+            # 设置文本参数
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            font_color = (0, 255, 0) # Green
+            thickness = 1
+            text_size, _ = cv2.getTextSize(text_to_display, font, font_scale, thickness)
+            text_x = 10
+            text_y = text_size[1] + 10
             
-            plt.figure(figsize=(8, 6)) # 设置图像大小
-            plt.imshow(image_rgb_for_display)
-            plt.title(final_display_text_for_viz, fontsize=12) # 在图像上方显示最终的识别文本
-            plt.axis('off') # 关闭坐标轴显示
-            
-            # 创建结果保存目录 (如果不存在)
-            results_output_dir = config.get('results_dir', "results") # 可从配置获取，默认为 "results"
-            if not os.path.exists(results_output_dir): 
-                os.makedirs(results_output_dir)
-                print(f"已创建推理结果保存目录: {results_output_dir}")
-            
-            # 构建结果图像的文件名
-            original_image_basename = os.path.basename(config.image_path)
-            name_part, ext_part = os.path.splitext(original_image_basename)
-            result_image_filename = f"recognition_result_for_{name_part}_{model_type_from_saved_config}_{loss_type_from_saved_config}{ext_part if ext_part else '.png'}"
-            result_image_full_path = os.path.join(results_output_dir, result_image_filename)
-            
-            plt.savefig(result_image_full_path)
-            plt.close() # 关闭图像，释放资源
-            print(f"推理结果的可视化图像已保存至: {result_image_full_path}")
-        except ImportError:
-            print("警告: Matplotlib 未能正确导入或配置，无法显示或保存可视化结果图像。请确保已安装并配置好 Matplotlib。")
-        except Exception as e_viz:
-            print(f"可视化过程中发生错误: {e_viz}。结果图像可能未保存或不完整。")
-    else:
-        print("可视化输出未启用 (infer_visualize 未设置为 true 或配置中缺失)。")
+            # 绘制带背景的文本
+            cv2.rectangle(img_display, (text_x - 2, text_y - text_size[1] - 2), 
+                          (text_x + text_size[0] + 2, text_y + 2), (0,0,0), -1) # Black background
+            cv2.putText(img_display, text_to_display, (text_x, text_y), font, 
+                        font_scale, font_color, thickness, cv2.LINE_AA)
 
-    return input_image_features_tensor.numpy() # 返回特征向量
+            results_dir = "results"
+            os.makedirs(results_dir, exist_ok=True)
+            
+            base_img_name = os.path.splitext(os.path.basename(target_image_path))[0]
+            model_name_tag = f"{loaded_model_type}_{loaded_loss_type}"
+            output_filename = f"infer_{model_name_tag}_{base_img_name}_{predicted_label_name.replace(' ', '_')}.png"
+            output_path = os.path.join(results_dir, output_filename)
+            
+            cv2.imwrite(output_path, img_display)
+            print(f"推理结果图像已保存到: {output_path}")
+
+        except Exception as e_vis:
+            print(f"可视化推理结果时发生错误: {e_vis}")
+
+    print("推理完成。")
 
 if __name__ == '__main__':
     # --- 命令行参数解析 --- 
@@ -548,13 +491,7 @@ if __name__ == '__main__':
 
     # 执行推理
     try:
-        result = infer(final_config)
-        print(f"推理完成。")
-        # 这里可以根据需要处理或打印推理结果 (result)
-        # 例如，打印特征向量的前几个维度
-        print(f"获取到的特征向量 (前10维): {result.flatten()[:10]}...") 
-        # 或者如果任务是分类，可能需要不同的后处理
-        
+        infer(final_config, cmd_line_args)
     except FileNotFoundError as e:
         print(f"推理失败: {e}")
     except RuntimeError as e:

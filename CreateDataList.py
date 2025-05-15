@@ -279,7 +279,7 @@ if __name__ == '__main__':
     # 执行列表创建
     data_lister_instance.create_data_list(
         data_root_path=args.data_root,
-        train_list_name="train.list",
+        train_list_name="trainer.list",
         test_list_name="test.list",
         acceptance_list_name="acceptance.list",
         meta_file_name="readme.json",

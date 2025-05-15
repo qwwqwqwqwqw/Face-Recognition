@@ -29,19 +29,19 @@ active_config: vgg_ce_steplr_config # <--- 您可以根据需要修改这里
 # --- 全局设置 (这些设置会被下面的具体配置块覆盖) ---
 global_settings:
   use_gpu: true                  # 是否使用GPU训练
-  resume: false                  # 是否从检查点恢复训练
+  resume: true                  # 是否从检查点恢复训练 (默认为true，以继续现有组合的训练)
   seed: 42                       # 随机种子，用于保证实验的可重复性
   data_dir: data                 # 数据集根目录
   class_name: face               # 数据集类别名称
   model_save_dir: model          # 模型保存目录
-  epochs: 20                    # 默认训练总轮数 (这里设置全局轮数)
+  epochs: 5                    # 默认训练总轮数 (这里设置全局轮数)
   log_train_image_interval: 5     # 每 5 个 epoch 记录一次训练图片
   log_eval_image_interval: 5      # 每 5 个 epoch 记录一次评估图片
   log_histogram_interval: 2     # 每 2 个 epoch 记录一次直方图
   log_interval: 10               # 训练日志打印间隔 (steps)
   image_size: 112                # 输入模型图像尺寸 (高和宽相同)
-  num_classes: 100               # 数据集中类别的数量 (根据实际数据集调整)
-  batch_size: 64                 # 训练批大小：DataLoader 会将 batch_size 张图片打包成一个"批次"喂给模型。模型会同时处理这一个批次的图片。
+  num_classes: 5               # 数据集中类别的数量 
+  batch_size: 256                 # 训练批大小：DataLoader 会将 batch_size 张图片打包成一个"批次"喂给模型。模型会同时处理这一个批次的图片。
   #显存不足 (Out of Memory - OOM): 这是最常见需要调整 batch_size 的情况。如果训练过程中提示显存不足，说明一个批次的数据量太大了，需要减小 batch_size。
   #训练稳定性: 增大 batch_size 可以使每个批次计算的梯度更接近整个数据集的真实梯度，从而使训练更稳定，收敛更快。但批次过大也可能导致模型收敛到次优解。
   #计算效率: 在显存允许范围内，适当增大 batch_size 可以更有效地利用 GPU 的并行计算能力，加速训练。
@@ -93,7 +93,7 @@ global_settings:
       # last_epoch: -1           # 如果从检查点恢复，需要根据当前epoch设置
     warmup:                      # 学习率预热设置
       use_warmup: True           # 是否使用预热
-      warmup_steps: 50          # 预热的步数
+      warmup_steps: 20          # 预热的步数
       start_lr: 0.001            # 预热开始时的学习率
       #在预热阶段，学习率会从 start_lr 线性增加到 initial_learning_rate。这有助于模型在训练初期稳定。
 
@@ -311,9 +311,9 @@ vgg_arcface_steplr_config:
       warmup_steps: 500
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_vgg_arcface_steplr.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_vgg_arcface_steplr.pkl # 推理时使用训练好的库
+    face_library_path: face_library.pkl # 推理时使用训练好的库
     recognition_threshold: 0.5 # ArcFace 推理阈值
   compare:
     compare_threshold: 0.8 # ArcFace 对比阈值
@@ -345,9 +345,9 @@ vgg_arcface_multistep_config:
       warmup_steps: 500
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_vgg_arcface_multistep.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_vgg_arcface_multistep.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8
@@ -379,9 +379,9 @@ vgg_arcface_cosine_config:
       warmup_steps: 500
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_vgg_arcface_cosine.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_vgg_arcface_cosine.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8
@@ -419,9 +419,9 @@ vgg_arcface_reduce_lr_config:
       warmup_steps: 0
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_vgg_arcface_reduce_lr.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_vgg_arcface_reduce_lr.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8
@@ -455,9 +455,9 @@ vgg_arcface_warm_restarts_config:
       warmup_steps: 500
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_vgg_arcface_warm_restarts.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_vgg_arcface_warm_restarts.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8
@@ -631,9 +631,9 @@ resnet_arcface_steplr_config:
       warmup_steps: 500
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_resnet_arcface_steplr.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_resnet_arcface_steplr.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8
@@ -670,9 +670,9 @@ resnet_arcface_multistep_config:
       warmup_steps: 500
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_resnet_arcface_multistep.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_resnet_arcface_multistep.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8
@@ -709,9 +709,9 @@ resnet_arcface_cosine_config:
       warmup_steps: 500
       start_lr: 0.001
   create_library:
-    output_library_path: model/face_library_resnet_arcface_cosine.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_resnet_arcface_cosine.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8
@@ -754,7 +754,7 @@ resnet_arcface_reduce_lr_lr_config: # 注意这里的键名可能有点问题，
       warmup_steps: 500
       start_lr: 0.001
   infer:
-    face_library_path: 'model/face_library_resnet_arcface_reduce_lr.pkl'
+    face_library_path: face_library.pkl # 修改这里
     recognition_threshold: 0.5
     label_file: "readme.json"
     infer_visualize: true
@@ -762,7 +762,7 @@ resnet_arcface_reduce_lr_lr_config: # 注意这里的键名可能有点问题，
     compare_threshold: 0.8
     compare_visualize: true
   create_library:
-    output_library_path: 'model/face_library_resnet_arcface_reduce_lr.pkl'
+    output_library_path: face_library.pkl # 修改这里
 
 resnet_arcface_warm_restarts_config:
   model_type: resnet
@@ -797,9 +797,9 @@ resnet_arcface_warm_restarts_config:
   image_size: 112
   num_classes: 100
   create_library:
-    output_library_path: model/face_library_resnet_arcface_warm_restarts.pkl
+    output_library_path: face_library.pkl
   infer:
-    face_library_path: model/face_library_resnet_arcface_warm_restarts.pkl
+    face_library_path: face_library.pkl
     recognition_threshold: 0.5
   compare:
     compare_threshold: 0.8

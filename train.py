@@ -257,6 +257,7 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     backbone_type = final_config.model_type
     loss_fn_type = final_config.loss_type
     lr_scheduler_name = final_config.lr_scheduler_type
+    active_config_name = getattr(final_config, '_active_config_name', None) # Get active config name for logging
 
     combo_dir_name = f"{backbone_type}__{loss_fn_type}__{lr_scheduler_name}"
     timestamp_str = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -287,7 +288,6 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
         for opt_param_key, opt_param_val in final_config.optimizer_params.items():
             hparams_dict[f"opt_{opt_param_key}"] = opt_param_val
             
-    active_config_name = getattr(final_config, '_active_config_name', None)
     if active_config_name:
         hparams_dict['active_config_yaml'] = active_config_name
     
@@ -377,17 +377,70 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     else:
         raise ValueError(f"不支持的优化器类型: {final_config.optimizer_type}")
 
-    checkpoint_save_subdir = os.path.join(current_logdir, "checkpoints")
-    checkpoint_manager_model_name = "model_checkpoint" 
-    if active_config_name:
-        checkpoint_manager_model_name = active_config_name
+    # 定义固定的检查点文件名
+    fixed_checkpoint_filename_base = "model_checkpoint"
+
+    # --- 新的检查点加载逻辑 ---
+    start_epoch = 0
+    best_acc = 0.0
+    loaded_meta_data = {} # Initialize with an empty dict
+
+    if final_config.resume: # final_config.resume is True by default from YAML (after change)
+        combo_logs_path = os.path.join(base_log_dir, combo_dir_name)
+        latest_prev_run_dir = None
+        if os.path.exists(combo_logs_path):
+            all_prev_runs = sorted([
+                d for d in os.listdir(combo_logs_path)
+                if os.path.isdir(os.path.join(combo_logs_path, d)) and d != current_run_dir_name # Exclude current run
+            ]) # Sorts alphabetically, which works for YYYYMMDD-HHMMSS
+            if all_prev_runs:
+                latest_prev_run_dir_name = all_prev_runs[-1]
+                latest_prev_run_dir = os.path.join(combo_logs_path, latest_prev_run_dir_name)
         
+        if latest_prev_run_dir:
+            previous_checkpoint_save_subdir = os.path.join(latest_prev_run_dir, "checkpoints")
+            # Correctly form the expected paths including the "checkpoint_" prefix used by CheckpointManager
+            expected_pdparams_path = os.path.join(previous_checkpoint_save_subdir, f"checkpoint_{fixed_checkpoint_filename_base}.pdparams")
+            expected_metadata_path = os.path.join(previous_checkpoint_save_subdir, f"checkpoint_{fixed_checkpoint_filename_base}.json")
+
+            if os.path.exists(expected_pdparams_path) and os.path.exists(expected_metadata_path):
+                print(f"Resuming. Attempting to load checkpoint from prior run: {previous_checkpoint_save_subdir}")
+                # 使用临时的 CheckpointManager 从先前运行加载
+                loader_checkpoint_manager = CheckpointManager(
+                    model_save_dir=previous_checkpoint_save_subdir,
+                    model_name=fixed_checkpoint_filename_base # Use fixed name for loading
+                )
+                # load_checkpoint should correctly set its internal paths based on its init params
+                start_epoch, best_acc, loaded_meta_data = loader_checkpoint_manager.load_checkpoint(
+                    model, optimizer, lr_scheduler, resume=True # resume=True here to force loading attempt
+                )
+                if start_epoch > 0: # Indicates successful load
+                    print(f"成功从 {latest_prev_run_dir} 恢复。起始 epoch: {start_epoch}, 上次运行的最佳准确率: {best_acc:.4f}")
+                else:
+                    print(f"警告: 尝试从 {latest_prev_run_dir} 加载检查点但未能恢复有效状态 (start_epoch is 0)。将从头开始训练。")
+                    # Ensure best_acc is reset if load "failed" to produce a resume state
+                    best_acc = 0.0
+                    loaded_meta_data = {} 
+            else:
+                print(f"配置了恢复训练 (resume=True)，但在最新的先前运行目录 {latest_prev_run_dir} 中未找到有效的检查点文件 ({fixed_checkpoint_filename_base}.pdparams/.json)。将从头开始训练。")
+        else:
+            print(f"配置了恢复训练 (resume=True)，但未找到相同超参数组合的先前运行记录。将从头开始训练。")
+    else: # final_config.resume is False
+        print("未配置恢复训练 (resume=False)。将从头开始训练。")
+        # start_epoch, best_acc, loaded_meta_data remain 0, 0.0, {}
+
+    # --- 初始化用于保存到当前运行目录的 CheckpointManager ---
+    checkpoint_save_subdir = os.path.join(current_logdir, "checkpoints")
+    # checkpoint_manager_model_name = active_config_name if active_config_name else combo_dir_name # 旧的动态命名
     checkpoint_manager = CheckpointManager(
         model_save_dir=checkpoint_save_subdir,
-        model_name=checkpoint_manager_model_name
+        model_name=fixed_checkpoint_filename_base # 使用固定的基础名称
     )
+    # 注意: loaded_meta_data['previous_best_acc'] 会由 CheckpointManager.load_checkpoint 内部设置。
+    # 如果是全新训练，best_acc 是 0.0， save_checkpoint 将正确处理。
 
-    start_epoch, best_acc, loaded_meta_data = checkpoint_manager.load_checkpoint(model, optimizer, lr_scheduler, final_config.resume)
+    # 旧的加载逻辑 (直接加载到当前目录的CheckpointManager，如果存在的话)
+    # start_epoch, best_acc, loaded_meta_data = checkpoint_manager.load_checkpoint(model, optimizer, lr_scheduler, final_config.resume)
 
     training_start_time = time.time()
     print(f"开始训练，总共 {final_config.epochs} 个 epochs... 从 epoch {start_epoch} 开始")
@@ -416,7 +469,13 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
             'git_hash': get_git_commit_hash(),
             'last_eval_accuracy': test_accuracy,
             'last_eval_loss': test_avg_loss,
-            'previous_best_acc': best_acc
+            'previous_best_acc': best_acc,
+            'model_specific_params': final_config.model.get(f'{final_config.model_type}_params', {}).to_dict() 
+                                     if isinstance(final_config.model.get(f'{final_config.model_type}_params', {}), ConfigObject) 
+                                     else final_config.model.get(f'{final_config.model_type}_params', {}),
+            'loss_specific_params': final_config.loss.get(f'{final_config.loss_type}_params', {}).to_dict()
+                                    if isinstance(final_config.loss.get(f'{final_config.loss_type}_params', {}), ConfigObject)
+                                    else final_config.loss.get(f'{final_config.loss_type}_params', {})
         }
         checkpoint_manager.save_checkpoint(model, optimizer, lr_scheduler, current_metadata, is_best=is_best)
         if is_best:
@@ -425,8 +484,8 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     print("\n训练完成。")
     print(f"总耗时: {time.time() - training_start_time:.2f} 秒")
     print(f"在评估集上的最佳准确率: {best_acc:.4f}")
-    print(f"最终模型检查点位于: {checkpoint_manager.checkpoint_path}")
-    print(f"性能最佳的模型位于: {checkpoint_manager.best_model_path}")
+    print(f"最终模型检查点位于: {checkpoint_manager.checkpoint_path}") # Path to the latest checkpoint of THIS run
+    print(f"性能最佳的模型位于: {checkpoint_manager.best_model_path}") # Path to the best model of THIS run
 
     print("\n开始导出训练好的模型 (骨干网络) 到 Paddle Inference 格式...")
     export_model_name_prefix = "model_for_graph" 
@@ -440,8 +499,8 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
         )
 
         if not os.path.exists(checkpoint_manager.best_model_path):
-             print(f"警告: 最佳模型文件 {checkpoint_manager.best_model_path} 未找到，无法导出用于Graph的骨干网络。")
-             model_to_export = None
+            print(f"警告: 最佳模型文件 {checkpoint_manager.best_model_path} 未找到，无法导出用于Graph的骨干网络。")
+            model_to_export = None
         else:
             print(f"从最佳模型加载骨干网络权重: {checkpoint_manager.best_model_path}")
             full_model_state_dict = paddle.load(checkpoint_manager.best_model_path)
@@ -476,6 +535,60 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     if log_writer:
         log_writer.close()
         print("VisualDL LogWriter 已关闭。")
+
+    # --- 训练完成后，如果使用的是ArcFace，自动创建特征库 ---
+    if final_config.loss_type.lower() == 'arcface':
+        print("\n--- ArcFace 模型训练完成，尝试自动创建特征库 ---")
+        try:
+            # 确保导入 create_face_library 函数
+            try:
+                from create_face_library import create_face_library as build_feature_lib
+                print("成功导入 create_face_library.py 中的 build_feature_lib 函数。")
+            except ImportError as e_import_cfl:
+                print(f"错误: 导入 create_face_library 模块失败: {e_import_cfl}。自动建库将跳过。")
+                build_feature_lib = None
+
+            if build_feature_lib:
+                # 确保最佳模型路径存在
+                if not checkpoint_manager.best_model_path or not os.path.exists(checkpoint_manager.best_model_path):
+                    print(f"错误: 最佳模型路径 {checkpoint_manager.best_model_path} 未找到或无效。无法自动创建特征库。")
+                else:
+                    print(f"准备使用最佳模型 {checkpoint_manager.best_model_path} 自动创建特征库。")
+                    pseudo_cmd_args_for_lib_creation = argparse.Namespace(
+                        config_path=cmd_line_args.config_path, # 复用原始的config_path
+                        active_config=active_config_name, # 使用当前运行的 active_config
+                        model_path=checkpoint_manager.best_model_path, # 使用当前运行的最佳模型
+                        data_dir=final_config.data_dir, 
+                        # class_name 将从 final_config 获取
+                        # face_library_path 设为 None，让 create_face_library 决定默认输出路径
+                        face_library_path=None, 
+                        use_gpu=final_config.use_gpu,
+                        image_size=final_config.image_size, # 从 final_config 获取
+                        # data_list_for_library: create_face_library 会从 config 中查找或使用默认
+                    )
+                    
+                    # 预期特征库的保存路径
+                    expected_lib_output_filename = final_config.create_library.get('output_library_path', 'face_library.pkl') \
+                                                 if hasattr(final_config, 'create_library') and final_config.create_library else 'face_library.pkl'
+                    expected_lib_full_path = os.path.join(os.path.dirname(checkpoint_manager.best_model_path), expected_lib_output_filename)
+                    
+                    print(f"调用 build_feature_lib。预期特征库将保存在: {expected_lib_full_path}")
+                    try:
+                        build_feature_lib(config=final_config, cmd_args=pseudo_cmd_args_for_lib_creation)
+                        print("build_feature_lib 调用完成。")
+                        if os.path.exists(expected_lib_full_path):
+                            print(f"成功: 特征库已创建于 {expected_lib_full_path}")
+                        else:
+                            print(f"警告: build_feature_lib 调用后，预期的特征库文件 {expected_lib_full_path} 未找到。请检查 create_face_library.py 的逻辑。")
+                    except Exception as e_build_lib_call:
+                        print(f"错误: 调用 build_feature_lib 时发生异常: {e_build_lib_call}")
+                        print(f"       您可以稍后手动运行 create_face_library.py 脚本，并指定模型路径为: {checkpoint_manager.best_model_path}")
+
+            else: # build_feature_lib is None due to import error
+                print("由于导入 create_face_library 失败，跳过自动创建特征库。")
+
+        except Exception as e_create_lib_outer:
+            print(f"错误: 自动创建特征库的准备阶段失败: {e_create_lib_outer}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='人脸识别模型训练脚本')

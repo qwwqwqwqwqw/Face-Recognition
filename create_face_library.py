@@ -45,287 +45,280 @@ import json   # 用于读取 readme.json 以获取标签ID到真实姓名的映�
 from tqdm import tqdm # 用于显示处理进度条
 from config_utils import load_config, ConfigObject # 导入配置加载工具和配置对象类型
 from model_factory import get_backbone # 仅需骨干网络进行特征提取
+from paddle.io import Dataset, DataLoader # Ensure DataLoader is imported if MyReader.create_data_loader is used indirectly
+import MyReader # Needed for MyReader.create_data_loader
+from utils.image_processing import process_image_local # 从共享模块导入
 
-# 假设 process_image_local 与 infer.py, compare.py 中的版本功能一致
-# 为避免重复，理想情况下应将其移至 utils.py 并从那里导入
-def process_image_local(img_path: str, target_size: int = 64, 
-                        mean_rgb: list[float] = [0.485, 0.456, 0.406], 
-                        std_rgb: list[float] = [0.229, 0.224, 0.225]) -> np.ndarray:
+def create_face_library(config: ConfigObject, cmd_args: argparse.Namespace):
     """
-    对单张输入图像进行预处理，为模型提取特征做准备。
-    （详细文档参考 infer.py 或 compare.py 中的同名函数）
+    使用预训练模型为指定数据集中的图像提取特征并保存为人脸特征库。
     """
-    img = cv2.imread(img_path)
-    if img is None: raise FileNotFoundError(f"错误: 无法读取图像文件 {img_path}")
-    img = cv2.resize(img, (target_size, target_size))
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img.astype('float32') / 255.0
-    mean = np.array(mean_rgb, dtype='float32').reshape((1, 1, 3))
-    std = np.array(std_rgb, dtype='float32').reshape((1, 1, 3))
-    img_normalized = (img - mean) / std
-    img_chw = img_normalized.transpose((2, 0, 1))
-    img_expanded = np.expand_dims(img_chw, axis=0)
-    return img_expanded.astype('float32')
+    # --- 设置设备 ---
+    use_gpu_flag = cmd_args.use_gpu if cmd_args.use_gpu is not None else config.get('use_gpu', True) # 提供默认值
+    use_gpu_flag = use_gpu_flag and paddle.is_compiled_with_cuda()
+    paddle.set_device('gpu' if use_gpu_flag else 'cpu')
+    print(f"使用 {'GPU' if use_gpu_flag else 'CPU'} 创建人脸库。")
 
-def create_face_library(config: ConfigObject):
-    """创建人脸特征库的主函数。
+    # --- 确定模型权重路径 ---
+    model_weights_path = cmd_args.model_path or \
+                         config.get('model_path') or \
+                         (config.create_library.get('model_path') if hasattr(config, 'create_library') and config.create_library else None)
 
-    根据提供的配置对象 `config`，遍历数据集，提取每个身份的平均特征向量，
-    并将这些特征向量保存到指定的特征库文件中。
-
-    Args:
-        config (ConfigObject): 包含所有所需参数的配置对象。
-                               关键参数包括 `model_path` (模型路径), `data_dir` (数据集根目录),
-                               `class_name` (数据集子目录名), `use_gpu` (是否使用GPU), 
-                               以及 `infer.face_library_path` (特征库保存路径)。
-    """
-    # --- 1. 设置运行设备 --- 
-    if config.use_gpu and paddle.is_compiled_with_cuda():
-        paddle.set_device('gpu')
-        print("使用 GPU 进行特征提取")
-    else:
-        paddle.set_device('cpu')
-        print("使用 CPU 进行特征提取")
+    if not model_weights_path:
+        raise ValueError("错误: 缺少模型文件路径。请通过 --model_path 或YAML配置提供。")
+    if not os.path.exists(model_weights_path):
+        raise FileNotFoundError(f"错误: 指定的模型权重文件未找到: {model_weights_path}")
+    print(f"将从模型文件 {model_weights_path} 加载模型用于创建人脸库。")
     
-    # --- 2. 检查并加载模型文件 --- 
-    if not config.model_path or not os.path.exists(config.model_path):
-        print(f"错误: 找不到指定的模型文件路径 '{config.model_path}' 或路径未配置。请通过 --model_path 或配置文件提供。")
-        return
-
-    print(f"从模型文件 {config.model_path} 加载模型参数和配置...")
-    try:
-        state_dict_container = paddle.load(config.model_path)
-        if not isinstance(state_dict_container, dict):
-            print(f"错误: 模型文件 {config.model_path} 内容格式不正确，期望为字典。")
-            return
-    except Exception as e:
-        print(f"错误: 加载模型文件 {config.model_path} 失败: {e}")
-        return
-
-    # --- 3. 解析模型文件中保存的训练时配置 --- 
-    saved_model_config_dict = state_dict_container.get('config')
-    if not saved_model_config_dict:
-        saved_model_config_dict = state_dict_container.get('args')
-        if saved_model_config_dict and not isinstance(saved_model_config_dict, dict):
-            saved_model_config_dict = vars(saved_model_config_dict)
+    # --- 确定输出特征库的路径 ---
+    output_path_from_config = config.create_library.get('output_library_path') if hasattr(config, 'create_library') and config.create_library else "face_library.pkl"
     
-    if not saved_model_config_dict or not isinstance(saved_model_config_dict, dict):
-        print(f"错误: 模型文件 {config.model_path} 中缺少有效的训练配置信息。")
-        return
+    final_output_library_path = None
+    source_of_output_path = ""
 
-    model_type_from_saved_config = saved_model_config_dict.get('model_type', 'resnet')
-    # 确定图像尺寸：优先使用模型训练时的尺寸
-    image_size_from_model_file = saved_model_config_dict.get('image_size')
-    effective_image_size = image_size_from_model_file
-    if hasattr(config, 'image_size') and config.image_size is not None:
-        if effective_image_size is not None and config.image_size != effective_image_size:
-             print(f"警告: 当前配置的图像大小 ({config.image_size}) 与模型训练时 ({effective_image_size}) 不一致。将优先使用模型训练时的大小: {effective_image_size}")
-        elif effective_image_size is None:
-            effective_image_size = config.image_size
-    if effective_image_size is None:
-        print(f"错误: 无法确定图像处理尺寸。模型或当前配置均未提供 'image_size'。")
-        return
-    print(f"特征提取时将使用图像大小: {effective_image_size}x{effective_image_size}")
+    if cmd_args.face_library_path:
+        final_output_library_path = cmd_args.face_library_path
+        source_of_output_path = "command line (--face_library_path)"
+        if os.path.isdir(final_output_library_path): # 如果命令行提供的是目录
+            lib_filename_to_append = "face_library.pkl" # 默认文件名
+            if isinstance(output_path_from_config, str) and not os.path.sep in output_path_from_config and output_path_from_config:
+                lib_filename_to_append = output_path_from_config # 使用配置中的文件名
+            final_output_library_path = os.path.join(final_output_library_path, lib_filename_to_append)
+            source_of_output_path += f" (appended filename '{lib_filename_to_append}')"
+    elif output_path_from_config:
+        if os.path.isabs(output_path_from_config) or os.path.sep in output_path_from_config:
+            final_output_library_path = output_path_from_config
+            source_of_output_path = "config (absolute/relative path)"
+        else: # 配置中的是文件名
+            model_dir = os.path.dirname(model_weights_path)
+            if not model_dir: # model_weights_path 可能是当前目录下的文件名
+                model_dir = os.getcwd()
+            final_output_library_path = os.path.join(model_dir, output_path_from_config)
+            source_of_output_path = f"config (filename only, resolved to model dir: {model_dir})"
+    else: # 命令行和配置中均未指定，或配置中 output_library_path 为空
+        model_dir = os.path.dirname(model_weights_path)
+        if not model_dir: model_dir = os.getcwd()
+        final_output_library_path = os.path.join(model_dir, "face_library.pkl") # 默认名
+        source_of_output_path = "default (model dir, face_library.pkl)"
 
-    # --- 4. 实例化骨干网络 --- 
-    backbone_params_from_model_file = saved_model_config_dict.get('backbone_params', {})
-    if not backbone_params_from_model_file:
-        legacy_model_section = saved_model_config_dict.get('model', {})
-        if model_type_from_saved_config == 'vgg' and 'vgg_params' in legacy_model_section:
-            backbone_params_from_model_file = legacy_model_section['vgg_params']
-        elif model_type_from_saved_config == 'resnet' and 'resnet_params' in legacy_model_section:
-            backbone_params_from_model_file = legacy_model_section['resnet_params']
+    print(f"特征库将保存至: {final_output_library_path} (路径来源: {source_of_output_path})")
+    # 创建输出目录（如果尚不存在）
+    output_dir_for_lib = os.path.dirname(final_output_library_path)
+    if output_dir_for_lib: # 确保目录名不为空（例如当输出到当前工作目录时）
+        os.makedirs(output_dir_for_lib, exist_ok=True)
+
+
+    # --- 尝试从模型元数据加载配置 ---
+    loaded_model_type = None
+    loaded_image_size = None
+    loaded_model_specific_params = {}
+    source_of_model_config = "N/A"
+    metadata_path = model_weights_path.replace('.pdparams', '.json')
+    using_metadata_config = False
+    metadata = {} # 初始化
+
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+            temp_model_type = metadata.get('model_type')
+            temp_image_size = metadata.get('image_size')
+            temp_model_specific_params = metadata.get('model_specific_params')
+
+            if all([temp_model_type, temp_image_size is not None, temp_model_specific_params is not None]):
+                loaded_model_type = temp_model_type
+                loaded_image_size = temp_image_size
+                loaded_model_specific_params = temp_model_specific_params if isinstance(temp_model_specific_params, dict) else {}
+                source_of_model_config = f"Metadata file ({metadata_path})"
+                using_metadata_config = True
+                print(f"已从元数据文件 {metadata_path} 加载构建骨干网络的配置。")
+            else:
+                print(f"警告: 模型元数据文件 {metadata_path} 中缺少部分骨干网络构建所需配置。")
+        except Exception as e:
+            print(f"警告: 加载或解析模型元数据文件 {metadata_path} 失败: {e}。")
     
-    backbone_instance, _ = get_backbone(
-        config_model_params=backbone_params_from_model_file,
-        model_type_str=model_type_from_saved_config,
-        image_size=effective_image_size
+    if not using_metadata_config:
+        print(f"将使用 create_face_library.py 的全局/命令行配置文件中的配置构建骨干网络。")
+        loaded_model_type = config.model_type
+        loaded_image_size = cmd_args.image_size if cmd_args.image_size is not None else config.image_size
+        loaded_model_specific_params_co = config.model.get(f'{loaded_model_type}_params', ConfigObject({}))
+        loaded_model_specific_params = loaded_model_specific_params_co.to_dict() if isinstance(loaded_model_specific_params_co, ConfigObject) else loaded_model_specific_params_co
+
+        source_of_model_config = "Global/CMD Config (fallback)"
+        if not all([loaded_model_type, loaded_image_size is not None]):
+             raise ValueError("错误: 无法从全局/命令行配置中确定骨干网络构建所需的核心配置 (model_type, image_size)。")
+    
+    print(f"--- 骨干网络构建配置来源: {source_of_model_config} ---")
+    print(f"  Model Type: {loaded_model_type}")
+    print(f"  Image Size (for model preproc): {loaded_image_size}")
+    print(f"  Model Params: {loaded_model_specific_params}")
+    print("--------------------------------------------------")
+
+    model_backbone, backbone_out_dim = get_backbone(
+        config_model_params=loaded_model_specific_params,
+        model_type_str=loaded_model_type,
+        image_size=loaded_image_size
     )
-    if not backbone_instance:
-        print(f"错误: 实例化骨干网络 ({model_type_from_saved_config.upper()}) 失败。")
-        return
-    print(f"骨干网络 ({model_type_from_saved_config.upper()}) 实例化成功。")
+    print(f"骨干网络 ({loaded_model_type.upper()}) 构建成功，输出特征维度: {backbone_out_dim}")
 
-    # --- 5. 加载骨干网络权重并设为评估模式 --- 
-    weights_key_to_load = 'backbone'
-    if model_type_from_saved_config == 'vgg' and 'model' in state_dict_container and 'backbone' not in state_dict_container:
-        weights_key_to_load = 'model' 
-
-    if weights_key_to_load in state_dict_container and backbone_instance:
-        try:
-            backbone_instance.set_state_dict(state_dict_container[weights_key_to_load])
-            backbone_instance.eval() 
-            print(f"{model_type_from_saved_config.upper()} 骨干网络权重从 '{weights_key_to_load}' 键加载成功，并设为评估模式。")
-        except Exception as e_load_weights:
-            print(f"错误: 加载骨干网络权重失败: {e_load_weights}")
-            return
-    elif backbone_instance:
-        print(f"错误: 模型文件 {config.model_path} 中未找到预期的骨干网络权重键 '{weights_key_to_load}'。")
-        return
-
-    # --- 6. 确定数据集路径和特征库保存路径 --- 
-    dataset_base_path = os.path.join(config.data_dir, config.class_name)
-    if not os.path.isdir(dataset_base_path):
-        print(f"错误: 数据集路径 '{dataset_base_path}' 不是一个有效的目录。请检查 config.data_dir 和 config.class_name。")
-        return
+    full_state_dict = paddle.load(model_weights_path)
+    backbone_state_dict_to_load = {k.replace('backbone.', '', 1): v for k, v in full_state_dict.items() if k.startswith('backbone.')}
     
-    infer_specific_config = config.get('infer', {}) # 推理相关配置通常在 infer 键下
-    face_library_save_path = infer_specific_config.get('face_library_path')
-    if not face_library_save_path:
-        print(f"错误: 未在配置中指定人脸特征库的保存路径 (期望在 infer.face_library_path)。")
-        # 可以选择一个默认路径，或者直接报错返回
-        # default_lib_name = f"face_features_{model_type_from_saved_config}.pkl"
-        # face_library_save_path = os.path.join(config.get('results_dir', 'results'), default_lib_name)
-        # print(f"       将尝试使用默认路径: {face_library_save_path}")
-        return # 修复：原先此处没有return，导致后续代码可能在路径无效时执行
-        
-    # 确保保存特征库的目录存在
-    lib_save_dir = os.path.dirname(face_library_save_path)
-    if lib_save_dir and not os.path.exists(lib_save_dir):
-        os.makedirs(lib_save_dir)
-        print(f"已创建特征库保存目录: {lib_save_dir}")
-
-    # --- 7. 遍历数据集，提取并平均每个身份的特征 --- 
-    face_feature_library = {} # 初始化空的特征库字典 {label_id: avg_feature_vector}
-    identities_processed_count = 0
-    total_images_processed_count = 0
-
-    print(f"\n开始从数据集 '{dataset_base_path}' 创建人脸特征库...")
-    # 遍历数据集基路径下的每个子目录 (每个子目录代表一个身份)
-    # 使用 try-except 块来处理 os.listdir 可能遇到的权限等问题
-    try:
-        person_directories = os.listdir(dataset_base_path)
-    except OSError as e_listdir:
-        print(f"错误: 无法列出数据集目录 '{dataset_base_path}' 中的内容: {e_listdir}")
-        return
-
-    for person_dir_name in tqdm(person_directories, desc="处理身份进度"):
-        person_full_path = os.path.join(dataset_base_path, person_dir_name)
-        if not os.path.isdir(person_full_path): continue # 跳过非目录文件，如 readme.json
-
-        # 解析身份标签ID。目录名格式通常为 "真实姓名_label_ID" 或 "ID"。
-        # 优先尝试从目录名中提取 "_label_" 后面的数字作为ID。
-        label_id_str = None
-        person_label_id_resolved = None # 用于存储解析成功的ID
-        if "_label_" in person_dir_name:
-            try:
-                label_id_str = person_dir_name.split("_label_")[-1]
-                person_label_id_resolved = int(label_id_str)
-            except (ValueError, IndexError):
-                print(f"警告: 无法从目录名 '{person_dir_name}' 中解析出有效的标签ID (格式应为 ..._label_ID)。将尝试使用目录名作为ID。")
-                person_label_id_resolved = person_dir_name # 使用整个目录名作为ID (可能需要后续处理)
-        else:
-            try:
-                person_label_id_resolved = int(person_dir_name)
-            except ValueError:
-                print(f"警告: 目录名 '{person_dir_name}' 不符合预期的标签ID格式。将使用目录名字符串作为临时ID。")
-                person_label_id_resolved = person_dir_name
-
-        person_features_list = [] # 存储当前身份所有图像的特征向量列表
-        num_images_for_person = 0
-
+    if backbone_state_dict_to_load:
+        model_backbone.set_state_dict(backbone_state_dict_to_load)
+        print(f"骨干网络权重从 {model_weights_path} (提取 'backbone.' 部分) 加载成功。")
+    else:
         try:
-            images_in_person_dir = os.listdir(person_full_path)
-        except OSError as e_listdir_person:
-            print(f"警告: 无法列出身份目录 '{person_full_path}' 中的图像: {e_listdir_person}。跳过此身份。")
-            continue
+            model_backbone.set_state_dict(full_state_dict)
+            print(f"骨干网络权重 (尝试直接加载整个文件) 从 {model_weights_path} 加载成功。")
+        except Exception as e_direct_bb_load:
+            raise RuntimeError(f"错误: 在模型文件 {model_weights_path} 中未找到 'backbone.' 前缀的权重，且直接加载整个状态字典到骨干网络失败: {e_direct_bb_load}。")
+    
+    model_backbone.eval()
 
-        for image_filename in images_in_person_dir:
-            image_full_path = os.path.join(person_full_path, image_filename)
-            if not image_filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+    # --- 数据准备 ---
+    # 默认使用训练列表建库，除非配置中指定了其他列表
+    data_list_for_library_name = "train.list" # 默认值
+    if hasattr(config, 'create_library') and config.create_library and config.create_library.get('data_list_for_library'):
+        data_list_for_library_name = config.create_library.get('data_list_for_library')
+
+    data_root_for_lists = cmd_args.data_dir or config.data_dir
+    class_name_for_lists = config.class_name # 通常是 'face'
+    
+    actual_library_data_list_path = os.path.join(data_root_for_lists, class_name_for_lists, data_list_for_library_name)
+
+    if not os.path.exists(actual_library_data_list_path):
+        raise FileNotFoundError(f"错误: 用于创建人脸库的数据列表文件 '{actual_library_data_list_path}' 未找到。")
+    print(f"将使用数据列表 '{actual_library_data_list_path}' 中的图像创建人脸库。")
+
+    image_mean = config.dataset_params.mean
+    image_std = config.dataset_params.std
+
+    library_features = []
+    library_labels_ids = []
+
+    print("开始从数据列表提取特征...")
+    try:
+        with open(actual_library_data_list_path, 'r', encoding='utf-8') as f_list:
+            # 使用 strip() 去除每行末尾的换行符，然后分割
+            image_paths_and_labels = [line.strip().split('\\t') for line in f_list if line.strip()]
+
+    except Exception as e:
+        raise IOError(f"读取或解析库数据列表 {actual_library_data_list_path} 失败: {e}")
+
+
+    with paddle.no_grad():
+        for item in tqdm(image_paths_and_labels, desc="处理图像建库"):
+            if len(item) != 2:
+                print(f"警告: 跳过格式不正确的行: {item} (在列表 {actual_library_data_list_path} 中)")
+            continue
+            img_relative_path, label_id_str = item
+            
+            # CreateDataList.py 生成的列表路径已经是相对于 data_dir 的 'class_name/image.jpg' 形式
+            # 所以我们直接用 data_dir 和这个相对路径拼接
+            full_img_path = os.path.join(data_root_for_lists, img_relative_path)
+
+            if not os.path.exists(full_img_path):
+                print(f"警告: 图像文件 {full_img_path} (来自列表项: {img_relative_path}) 未找到，已跳过。")
                 continue 
             
             try:
-                preprocessed_image_np = process_image_local(image_full_path, effective_image_size)
-                image_tensor = paddle.to_tensor(preprocessed_image_np)
+                img_processed_np = process_image_local(
+                    full_img_path,
+                    target_size=loaded_image_size,
+                    mean_rgb=image_mean,
+                    std_rgb=image_std
+                )
+                img_tensor = paddle.to_tensor(img_processed_np)
+                feature_vector = model_backbone(img_tensor).numpy().flatten()
                 
-                with paddle.no_grad(): 
-                    feature_vector_tensor = backbone_instance(image_tensor)
-                    feature_vector_np = feature_vector_tensor.numpy().flatten() 
-                
-                if feature_vector_np.size > 0:
-                    person_features_list.append(feature_vector_np)
-                    num_images_for_person += 1
-                else:
-                    print(f"警告: 从图像 {image_full_path} 提取的特征为空，将跳过此图像。")
-
-            except FileNotFoundError:
-                print(f"警告: 图像文件 {image_full_path} 未找到或无法读取，跳过。")
-            except Exception as e_img_proc:
-                print(f"警告: 处理图像 {image_full_path} 或提取特征时发生错误: {e_img_proc}，跳过此图像。")
-        
-        if person_features_list:
-            avg_feature_vector = np.mean(person_features_list, axis=0)
-            face_feature_library[person_label_id_resolved] = avg_feature_vector # 使用解析后的ID
-            identities_processed_count += 1
-            total_images_processed_count += num_images_for_person
-        else:
-            print(f"警告: 未能为身份 '{person_dir_name}' (解析ID: {person_label_id_resolved}) 提取任何有效的人脸特征。该身份将不会包含在特征库中。")
-
-    # --- 8. 保存特征库到文件 --- 
-    if not face_feature_library:
-        print("错误: 未能从数据集中提取任何有效的人脸特征。特征库为空，将不会保存。")
-        print(f"       请检查数据集路径 '{dataset_base_path}' 的结构、图像内容以及模型是否能正确提取特征。")
+                library_features.append(feature_vector)
+                library_labels_ids.append(int(label_id_str))
+            except Exception as e_proc:
+                print(f"警告: 处理图像 {full_img_path} 时发生错误: {e_proc}，已跳过。")
+                continue
+    
+    if not library_features:
+        print("错误: 未能从数据列表中成功提取任何特征。人脸库为空，无法保存。")
         return
 
-    try:
-        with open(face_library_save_path, 'wb') as f_pickle_out:
-            pickle.dump(face_feature_library, f_pickle_out)
-        print(f"\n人脸特征库创建完成！")
-        print(f"  处理了 {identities_processed_count} 个不同身份，总共 {total_images_processed_count} 张有效图像。")
-        print(f"  特征库已保存到: {face_library_save_path}")
-        print(f"  特征库中包含 {len(face_feature_library)} 个身份的平均特征向量。")
-        # 修复 f-string: \" 应为 \\" 或直接移除不必要的转义
-        readme_json_expected_path = os.path.join(dataset_base_path, "readme.json")
-        print(f"提示: 请确保与此特征库配套使用的标签映射文件 (例如 '{readme_json_expected_path}')是最新的，")
-        print(f"       并且在推理时正确加载，以便将识别出的标签ID转换为可读的人名。")
+    library_features_np = np.array(library_features, dtype='float32')
+    library_labels_ids_np = np.array(library_labels_ids, dtype='int64')
 
-    except Exception as e_save_lib:
-        print(f"错误: 保存人脸特征库到文件 {face_library_save_path} 失败: {e_save_lib}")
+    try:
+        with open(final_output_library_path, 'wb') as f_lib:
+            pickle.dump((library_features_np, library_labels_ids_np), f_lib)
+        print(f"人脸特征库已成功保存到: {final_output_library_path} (包含 {library_features_np.shape[0]} 个特征)。")
+    except Exception as e_save:
+        raise IOError(f"保存人脸特征库到 {final_output_library_path} 失败: {e_save}")
+
+    print("创建人脸库完成。")
 
 if __name__ == '__main__':
-    # --- 命令行参数解析 --- 
-    parser = argparse.ArgumentParser(description='创建人脸特征库脚本')
+    parser = argparse.ArgumentParser(description="使用预训练的人脸识别模型创建人脸特征库。")
+    parser.add_argument('--config_path', type=str, default='configs/default_config.yaml',
+                        help='配置文件的路径。')
+    parser.add_argument('--active_config', type=str, default=None, 
+                        help='要激活的配置块名称 (覆盖YAML中的 active_config)。选择包含ArcFace等需要建库的模型配置。')
     
-    # 核心控制参数
-    parser.add_argument('--config_path', type=str, default=None, 
-                        help='指定YAML配置文件的路径。')
-    parser.add_argument('--model_path', type=str, # required=True, 但由config_utils处理
-                        help='训练好的人脸识别模型文件路径 (.pdparams) (必需，除非在YAML中指定)。') 
+    # 核心输入：模型路径
+    parser.add_argument('--model_path', type=str, default=None,
+                        help='必需：训练好的人脸识别模型 (.pdparams) 的路径。脚本将从此模型加载权重。')
     
-    # 数据集和输出路径相关 (通常由YAML配置，但允许命令行覆盖)
+    # 数据相关 (通常由配置文件管理，但允许覆盖)
     parser.add_argument('--data_dir', type=str, default=None,
-                        help='包含各个人物图像子目录的数据集根目录 (覆盖 global_settings.data_dir)。')
-    parser.add_argument('--class_name', type=str, default=None,
-                        help='数据集根目录下的特定子目录名 (覆盖 global_settings.class_name)。')
+                        help='数据集根目录 (覆盖YAML中的 data_dir)。')
+    # parser.add_argument('--class_name', type=str, default=None, # class_name 通常全局一致
+    #                     help='数据集类别名 (覆盖YAML)')
+    parser.add_argument('--data_list_for_library', type=str, default=None,
+                        help='(可选) 用于建库的特定图像列表文件名称 (位于 data_dir/class_name/ 下)。默认为配置文件中指定或 "train.list"。')
+
+    # 输出相关
     parser.add_argument('--face_library_path', type=str, default=None,
-                        help='生成的特征库文件保存路径 (.pkl) (覆盖 infer.face_library_path)。')
+                        help='(可选) 输出人脸库文件的完整路径或目录。如果只提供目录，将使用配置文件中的文件名或默认名 "face_library.pkl"。'
+                             '如果未指定，将根据配置文件或模型路径推断。')
     
-    # 其他可覆盖配置文件的参数
-    parser.add_argument('--use_gpu', action=argparse.BooleanOptionalAction, default=None,
-                        help='是否使用GPU进行特征提取 (覆盖 global_settings.use_gpu)。')
+    # 运行参数
+    parser.add_argument('--use_gpu', action=argparse.BooleanOptionalAction, default=None, help='是否使用GPU (覆盖YAML)。')
     parser.add_argument('--image_size', type=int, default=None,
-                        help='输入图像预处理后的统一大小 (覆盖配置文件或模型自带的 image_size)。')
+                        help='(可选) 强制指定模型加载和图像预处理时使用的图像尺寸。强烈建议让脚本从模型元数据推断此值。')
 
     cmd_line_args = parser.parse_args()
 
-    # --- 配置加载与合并 --- 
+    # 检查 --model_path 是否提供 (因为后续逻辑依赖它)
+    # 虽然 load_config 会加载，但这里做一个早期检查
+    effective_model_path = cmd_line_args.model_path
+    if not effective_model_path:
+        # 尝试从配置文件加载 model_path (如果 active_config 指定的块里有)
+        temp_config_for_model_path_check = load_config(cmd_line_args.config_path, cmd_line_args)
+        effective_model_path = temp_config_for_model_path_check.get('model_path') or \
+                               (temp_config_for_model_path_check.create_library.get('model_path') if hasattr(temp_config_for_model_path_check, 'create_library') and temp_config_for_model_path_check.create_library else None)
+    
+    if not effective_model_path:
+        parser.error("错误: 缺少模型文件路径。请通过 --model_path 参数或在YAML配置的相应块中 (如 active_config 指向的块的 model_path 或 create_library.model_path) 提供。")
+
+
     final_config = load_config(
-        default_yaml_path='configs/default_config.yaml',
-        cmd_args_namespace=cmd_line_args
+        default_yaml_path=cmd_line_args.config_path,
+        cmd_args_namespace=cmd_line_args # 传递命令行参数以覆盖
     )
+    
+    # 再次确保 model_path 在 final_config 中，因为它是后续逻辑的关键
+    if not final_config.get('model_path') and not (hasattr(final_config, 'create_library') and final_config.create_library and final_config.create_library.get('model_path')):
+        if cmd_line_args.model_path: # 如果命令行有，但没合并到 config 对象中
+            final_config['model_path'] = cmd_line_args.model_path # 手动注入
+        else:
+            # 此处不应到达，因为前面有 parser.error
+            print("严重错误: model_path 未能设置到 final_config。")
+            exit(1)
 
-    # 检查关键参数是否已配置 (model_path, data_dir, class_name, face_library_path)
-    if not final_config.model_path:
-        parser.error("错误: 缺少模型文件路径。请通过 --model_path 或YAML配置提供。")
-    if not final_config.data_dir:
-        parser.error("错误: 缺少数据集根目录。请通过 --data_dir 或YAML配置提供。")
-    if not final_config.class_name:
-        parser.error("错误: 缺少数据集子目录名。请通过 --class_name 或YAML配置提供。")
-    # 检查 infer.face_library_path 是否在配置中
-    infer_cfg_check = final_config.get('infer')
-    if not infer_cfg_check or not infer_cfg_check.get('face_library_path'): 
-        parser.error("错误: 缺少特征库保存路径。请在YAML配置文件的 infer.face_library_path 中指定，或通过 --face_library_path 提供。")
 
-    # 执行特征库创建
-    create_face_library(final_config) 
+    # 将命令行中可能覆盖 create_library 子配置的参数合并进去
+    if not hasattr(final_config, 'create_library') or final_config.create_library is None:
+        final_config.create_library = ConfigObject({})
+
+    if cmd_line_args.data_list_for_library:
+        final_config.create_library['data_list_for_library'] = cmd_line_args.data_list_for_library
+    # output_library_path 的处理已在 create_face_library 函数内部完成 (基于 cmd_args.face_library_path)
+
+    create_face_library(final_config, cmd_line_args) 

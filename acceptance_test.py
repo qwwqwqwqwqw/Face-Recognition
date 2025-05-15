@@ -20,7 +20,7 @@
 import os
 import argparse
 import paddle
-import numpy as np
+import numpy as np # type: ignore
 import json # 用于加载模型元数据或保存结果
 import time
 
@@ -78,39 +78,69 @@ def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace
         print(f"加载模型权重文件 {model_weights_path} 失败: {e}")
         return
 
-    # 从加载的检查点或当前配置中获取模型参数
-    # 优先使用检查点中保存的配置来确定模型结构，如果存在的话
-    ckpt_config_dict = checkpoint_data.get('config', {})
-    if not ckpt_config_dict: # 如果检查点中没有配置快照
-        print("警告: 加载的模型检查点中不包含配置快照。将完全依赖当前脚本的配置来实例化模型。")
+    # --- 重点修改：从元数据文件或当前配置中获取模型参数 ---
+    model_type_to_use = None
+    loss_type_to_use = None
+    num_classes_to_use = None
+    image_size_to_use = None
+    backbone_specific_params_to_use = {}
+    head_specific_params_to_use = {}
+    source_of_model_config = "未确定"
+
+    # 尝试加载与模型权重配对的 .json 元数据文件
+    metadata_json_path = model_weights_path.replace('.pdparams', '.json')
+    if os.path.exists(metadata_json_path):
+        print(f"尝试从元数据文件加载模型配置: {metadata_json_path}")
+        try:
+            with open(metadata_json_path, 'r', encoding='utf-8') as f_meta:
+                metadata = json.load(f_meta)
+            # 从元数据提取所需配置 (与 train.py 中 CheckpointManager 保存的元数据对应)
+            model_type_to_use = metadata.get('model_type')
+            loss_type_to_use = metadata.get('loss_type')
+            num_classes_to_use = metadata.get('num_classes')
+            image_size_to_use = metadata.get('image_size')
+            # model_specific_params 和 loss_specific_params 在元数据中可能是嵌套的字典
+            # config.model.get(f'{final_config.model_type}_params', {})
+            if isinstance(metadata.get('model_specific_params'), dict):
+                backbone_specific_params_to_use = metadata['model_specific_params']
+            if isinstance(metadata.get('loss_specific_params'), dict):
+                head_specific_params_to_use = metadata['loss_specific_params']
+            
+            if all([model_type_to_use, loss_type_to_use, num_classes_to_use is not None, image_size_to_use is not None]):
+                source_of_model_config = f"元数据文件 ({metadata_json_path})"
+                print(f"成功从元数据文件加载模型配置。")
+            else:
+                print(f"警告: 元数据文件 {metadata_json_path} 不完整，缺少核心模型配置。将回退。")
+                # 部分加载成功也可能导致后续使用 fallback 值，所以重置确保一致性
+                model_type_to_use, loss_type_to_use, num_classes_to_use, image_size_to_use = None, None, None, None 
+        except Exception as e_meta_load:
+            print(f"加载或解析元数据文件 {metadata_json_path} 失败: {e_meta_load}。将回退。")
+            model_type_to_use, loss_type_to_use, num_classes_to_use, image_size_to_use = None, None, None, None 
+
+    # 如果从元数据文件加载失败或不完整，则回退到当前脚本的配置
+    if source_of_model_config == "未确定":
+        source_of_model_config = "当前脚本的 final_config (回退机制)"
+        print(f"警告: 未能从配对的 .json 文件成功加载完整模型配置。将使用 {source_of_model_config}。"
+              f"请确保此配置与被测模型 {os.path.basename(model_weights_path)} 的训练时配置严格匹配，否则可能导致错误或不准确的评估。")
         model_type_to_use = config.model_type
         loss_type_to_use = config.loss_type
         num_classes_to_use = config.num_classes
         image_size_to_use = config.image_size
-        backbone_specific_params_to_use = config.model.get(f'{model_type_to_use}_params', {})
-        head_specific_params_to_use = config.loss.get(f'{loss_type_to_use}_params', {})
-    else: # 使用检查点中的配置
-        print("从加载的检查点配置快照中推断模型参数...")
-        # 将字典转换为ConfigObject以便于访问 (如果需要深层访问)
-        ckpt_config_obj = ConfigObject(ckpt_config_dict)
-        model_type_to_use = ckpt_config_obj.get('model_type', config.model_type)
-        loss_type_to_use = ckpt_config_obj.get('loss_type', config.loss_type)
-        num_classes_to_use = ckpt_config_obj.get('num_classes', config.num_classes)
-        image_size_to_use = ckpt_config_obj.get('image_size', config.image_size)
+        # 从当前 config 对象安全地获取参数
+        backbone_params_obj = config.model.get(f'{model_type_to_use}_params', ConfigObject({}))
+        backbone_specific_params_to_use = backbone_params_obj.to_dict() if isinstance(backbone_params_obj, ConfigObject) else backbone_params_obj
         
-        # 获取骨干和头部的特定参数
-        # 需要从ckpt_config_obj的 'model' 和 'loss' 字典中获取
-        ckpt_model_params_dict = ckpt_config_obj.get('model', {})
-        backbone_specific_params_to_use = ckpt_model_params_dict.get(f'{model_type_to_use}_params', 
-                                                                     config.model.get(f'{model_type_to_use}_params', {})) # Fallback
+        head_params_obj = config.loss.get(f'{loss_type_to_use}_params', ConfigObject({}))
+        head_specific_params_to_use = head_params_obj.to_dict() if isinstance(head_params_obj, ConfigObject) else head_params_obj
 
-        ckpt_loss_params_dict = ckpt_config_obj.get('loss', {})
-        head_specific_params_to_use = ckpt_loss_params_dict.get(f'{loss_type_to_use}_params', 
-                                                                config.loss.get(f'{loss_type_to_use}_params', {})) # Fallback
-        print(f"  推断模型类型: {model_type_to_use}, 损失类型: {loss_type_to_use}, 类别数: {num_classes_to_use}")
+    print(f"--- 模型实例化配置来源: {source_of_model_config} ---")
+    print(f"  模型类型: {model_type_to_use}, 损失类型: {loss_type_to_use}, 类别数: {num_classes_to_use}, 图像尺寸: {image_size_to_use}")
+    print(f"  骨干参数: {backbone_specific_params_to_use}")
+    print(f"  头部参数: {head_specific_params_to_use}")
+    print("---------------------------------------------------")
 
-    if not num_classes_to_use:
-        print("错误: 无法确定类别数量 (num_classes)。请检查模型检查点配置或当前脚本配置。")
+    if not all([model_type_to_use, loss_type_to_use, num_classes_to_use is not None, image_size_to_use is not None]):
+        print("错误: 无法最终确定模型构建所需的核心配置 (model_type, loss_type, num_classes, image_size)。请检查元数据或脚本配置。")
         return
 
     # 实例化骨干网络
@@ -120,11 +150,29 @@ def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace
             model_type_str=model_type_to_use,
             image_size=image_size_to_use
         )
-        if 'backbone' in checkpoint_data:
-            backbone_instance.set_state_dict(checkpoint_data['backbone'])
-            print(f"骨干网络 ({model_type_to_use}) 实例化并加载权重成功。输出特征维度: {feature_dim_from_backbone}")
+        # 修改权重加载逻辑
+        # if 'backbone' in checkpoint_data: # 旧的逻辑
+        #     backbone_instance.set_state_dict(checkpoint_data['backbone'])
+        #     print(f"骨干网络 ({model_type_to_use}) 实例化并加载权重成功。输出特征维度: {feature_dim_from_backbone}")
+        # else:
+        #     print(f"警告: 模型检查点中未找到 'backbone' 权重。骨干网络 ({model_type_to_use}) 将使用随机初始化权重，这可能不是期望的行为。")
+        
+        # 新的加载逻辑，兼容 CombinedModel 的 state_dict
+        if isinstance(checkpoint_data, dict): # 确保 checkpoint_data 是 state_dict
+            backbone_state_dict = {k.replace('backbone.', '', 1): v for k, v in checkpoint_data.items() if k.startswith('backbone.')}
+            if backbone_state_dict:
+                backbone_instance.set_state_dict(backbone_state_dict)
+                print(f"骨干网络 ({model_type_to_use}) 实例化并从检查点加载 'backbone.' 权重成功。输出特征维度: {feature_dim_from_backbone}")
+            else:
+                # 尝试将整个 state_dict 加载到 backbone (如果模型只包含 backbone)
+                try:
+                    backbone_instance.set_state_dict(checkpoint_data)
+                    print(f"骨干网络 ({model_type_to_use}) 实例化并尝试直接加载整个检查点权重成功。")
+                except Exception as e_direct_bb_load:
+                    print(f"警告: 在检查点中未找到 'backbone.' 前缀的权重，且直接加载整个状态字典到骨干网络失败: {e_direct_bb_load}。骨干网络将使用随机初始化权重。")
         else:
-            print(f"警告: 模型检查点中未找到 'backbone' 权重。骨干网络 ({model_type_to_use}) 将使用随机初始化权重，这可能不是期望的行为。")
+            print(f"警告: 加载的检查点数据不是预期的字典格式。骨干网络 ({model_type_to_use}) 将使用随机初始化权重。")
+
     except Exception as e:
         print(f"创建或加载骨干网络 ({model_type_to_use}) 失败: {e}")
         return
@@ -137,11 +185,27 @@ def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace
             in_features=feature_dim_from_backbone,
             num_classes=num_classes_to_use
         )
-        if 'head' in checkpoint_data:
-            head_module_instance.set_state_dict(checkpoint_data['head'])
-            print(f"头部模块 ({loss_type_to_use}) 实例化并加载权重成功。")
+        # 修改权重加载逻辑
+        # if 'head' in checkpoint_data: # 旧的逻辑
+        #     head_module_instance.set_state_dict(checkpoint_data['head'])
+        #     print(f"头部模块 ({loss_type_to_use}) 实例化并加载权重成功。")
+        # else:
+        #     print(f"警告: 模型检查点中未找到 'head' 权重。头部模块 ({loss_type_to_use}) 将使用随机初始化权重。")
+
+        # 新的加载逻辑，兼容 CombinedModel 的 state_dict
+        if isinstance(checkpoint_data, dict): # 确保 checkpoint_data 是 state_dict
+            head_state_dict = {k.replace('head.', '', 1): v for k, v in checkpoint_data.items() if k.startswith('head.')}
+            if head_state_dict:
+                head_module_instance.set_state_dict(head_state_dict)
+                print(f"头部模块 ({loss_type_to_use}) 实例化并从检查点加载 'head.' 权重成功。")
+            else:
+                # 尝试将整个 state_dict 加载到 head (如果模型只包含 head，虽然不太可能)
+                # 或者如果 loss_type_to_use 是一个不需要特定头部训练的类型 (例如，如果骨干直接输出分类)
+                # 但通常对于分类任务，总会有一个head。
+                print(f"警告: 在检查点中未找到 'head.' 前缀的权重。头部模块 ({loss_type_to_use}) 将使用随机初始化权重。")
         else:
-            print(f"警告: 模型检查点中未找到 'head' 权重。头部模块 ({loss_type_to_use}) 将使用随机初始化权重。")
+             print(f"警告: 加载的检查点数据不是预期的字典格式。头部模块 ({loss_type_to_use}) 将使用随机初始化权重。")
+
     except Exception as e:
         print(f"创建或加载头部模块 ({loss_type_to_use}) 失败: {e}")
         return
@@ -207,11 +271,21 @@ def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace
         'average_loss': final_avg_loss,
         'accuracy': final_accuracy,
         'config_used_for_eval': config.to_dict(), # 保存评估时使用的完整配置
-        'model_config_snapshot': ckpt_config_dict # 保存模型自带的配置快照
+        'model_config_snapshot': {
+            'model_type': model_type_to_use,
+            'loss_type': loss_type_to_use,
+            'num_classes': num_classes_to_use,
+            'image_size': image_size_to_use,
+            'model_specific_params': backbone_specific_params_to_use,
+            'loss_specific_params': head_specific_params_to_use
+        }
     }
     
     # 确定结果文件名和路径
-    results_dir = config.get("results_save_dir", "acceptance_results") # 从配置读取或使用默认
+    # results_dir = config.get("results_save_dir", "acceptance_results") # 从配置读取或使用默认 # 旧逻辑
+    results_dir_from_config = config.get("results_save_dir")
+    results_dir = results_dir_from_config if results_dir_from_config is not None else "acceptance_results"
+
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
         print(f"创建验收结果保存目录: {results_dir}")
