@@ -34,7 +34,7 @@ global_settings:
   data_dir: data                 # 数据集根目录
   class_name: face               # 数据集类别名称
   model_save_dir: model          # 模型保存目录
-  epochs: 10                    # 默认训练总轮数 (这里设置全局轮数)
+  epochs: 20                    # 默认训练总轮数 (这里设置全局轮数)
   log_train_image_interval: 5     # 每 5 个 epoch 记录一次训练图片
   log_eval_image_interval: 5      # 每 5 个 epoch 记录一次评估图片
   log_histogram_interval: 2     # 每 2 个 epoch 记录一次直方图
@@ -47,7 +47,7 @@ global_settings:
   #计算效率: 在显存允许范围内，适当增大 batch_size 可以更有效地利用 GPU 的并行计算能力，加速训练。
   #通常建议: 在显存允许的情况下，尽量使用较大的 batch_size。如果遇到 OOM，就减半，直到能正常运行。
   learning_rate: 0.1             # 默认初始学习率
-  optimizer_type: Momentum       # 默认优化器类型 (Momentum 或 AdamW)：不同的优化器有不同的参数更新策略。
+  optimizer_type: AdamW       # 默认优化器类型 (Momentum 或 AdamW)：不同的优化器有不同的参数更新策略。
   #Momentum: 模拟物理惯性，有助于冲过局部最优解。需要配合 momentum 参数。
   #AdamW: 自适应学习率，收敛速度快。需要配合 beta1, beta2, epsilon 参数。
   optimizer_params:              # 默认优化器参数
@@ -93,7 +93,7 @@ global_settings:
       # last_epoch: -1           # 如果从检查点恢复，需要根据当前epoch设置
     warmup:                      # 学习率预热设置
       use_warmup: True           # 是否使用预热
-      warmup_steps: 500          # 预热的步数
+      warmup_steps: 50          # 预热的步数
       start_lr: 0.001            # 预热开始时的学习率
       #在预热阶段，学习率会从 start_lr 线性增加到 initial_learning_rate。这有助于模型在训练初期稳定。
 

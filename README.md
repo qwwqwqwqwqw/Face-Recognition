@@ -6,21 +6,21 @@
 
 本项目利用 [PaddlePaddle](https://www.paddlepaddle.org.cn/) 深度学习框架，构建了一套灵活且高效的人脸对比和人脸识别系统。系统支持多种骨干网络和损失函数的组合，并通过集中的 YAML 配置文件和命令行参数实现了高度的可配置性。
 
-**最新成果**: 我们已成功实现了 **2种骨干网络 x 2种损失函数 x 5种学习率调度器的 20种组合的自动化正交训练测试**，为模型性能评估和优化提供了坚实基础。
+**最新成果**: 我们已成功实现了 **2种骨干网络 x 2种损失函数 x 5种学习率调度器的 20种组合的自动化正交训练测试**，并通过 VisualDL 实现了全面的实验可视化与对比，为模型性能评估和优化提供了坚实基础。
 
 ## ✨ 功能特性 (Core Features)
 
-* **灵活的模型组合**: 支持 VGG 和 ResNet 骨干网络，以及 CrossEntropy 和 ArcFace Loss。
-* **集中的配置管理**: 所有参数通过 `configs/default_config.yaml` 文件统一管理。
-* **命令行参数覆盖**: 支持通过命令行动态调整关键参数，方便实验。
-* **自动化训练脚本**: 提供 `train.sh` 脚本，支持对多种模型配置进行批量自动化训练和测试。
-* **高效的数据读取**: 基于 `MyReader.py` 实现自定义数据集加载和预处理。
-* **训练断点恢复**: 支持从检查点恢复训练，节省时间和计算资源。
-* **人脸特征提取、对比与识别**: 提供相应的脚本 (`create_face_library.py`, `compare.py`, `infer.py`) 实现核心人脸功能。
-* **数据增强**: 训练时支持随机翻转、亮度对比度调整等数据增强策略，提高模型泛化能力。
-* **云服务器自动训练**: 提供自动化训练脚本，支持在云服务器上持续训练和参数调整。
-* **[规划中] 对抗攻击与防御**: 实现FGSM、PGD等对抗攻击方法，并集成对抗训练以增强模型鲁棒性。
-* **[新增] 自动化正交训练测试**: 成功测试了 2种骨干网络× 2种损失组合× 5种学习率调度器的所有 20种正交组合的自动化训练流程。
+*   **灵活的模型组合**: 支持 VGG 和 ResNet 骨干网络，以及 CrossEntropy 和 ArcFace Loss。
+*   **集中的配置管理**: 所有参数通过 `configs/default_config.yaml` 文件统一管理。
+*   **命令行参数覆盖**: 支持通过命令行动态调整关键参数，方便实验。
+*   **自动化训练脚本**: 提供 `train.sh` 脚本，支持对多种模型配置进行批量自动化训练和测试。该脚本会为 VisualDL 产生结构化的日志，为后续可视化打基础。
+*   **全面的实验可视化与对比**: 利用 VisualDL 记录训练过程中的关键指标（损失、准确率、学习率、参数分布、图像样本、网络结构、超参数组合等），支持对不同超参数组合的实验结果进行层次化筛选和直观对比。
+*   **高效的数据读取**: 基于 `MyReader.py` 实现自定义数据集加载和预处理。
+*   **训练断点恢复**: 支持从检查点恢复训练，节省时间和计算资源。
+*   **人脸特征提取、对比与识别**: 提供相应的脚本 (`create_face_library.py`, `compare.py`, `infer.py`) 实现核心人脸功能。
+*   **数据增强**: 训练时支持随机翻转、亮度对比度调整等数据增强策略，提高模型泛化能力。
+*   **云服务器自动训练**: 提供自动化训练脚本，支持在云服务器上持续训练和参数调整。
+*   **[规划中] 对抗攻击与防御**: 实现FGSM、PGD等对抗攻击方法，并集成对抗训练以增强模型鲁棒性。
 
 ## 🚀 快速上手 (Quick Start)
 
@@ -66,44 +66,69 @@
         # 激活虚拟环境后执行
         # 为默认数据集 (data/face) 生成列表
         # (如果存在旧文件，先手动删除)
-        # rm -f data/face/trainer.list data/face/test.list data/face/readme.json
-        python CreateDataList.py data/face
+        # rm -f data/face/train.list data/face/test.list data/face/acceptance.list data/face/readme.json
+        python CreateDataList.py --data_root data/face --train_ratio 0.7 --acceptance_ratio 0.1
 
         # 为自定义数据集 (例如 data/my_faces) 生成列表
-        # python CreateDataList.py data/my_faces
+        # python CreateDataList.py --data_root data/my_faces
         ```
     **重要**:
-    * 在重新生成列表前，请**手动删除**目标目录下（如 `data/face` 或 `data/my_faces`）已存在的 `trainer.list`, `test.list`, 和 `readme.json` 文件。
-    * `CreateDataList.py` 脚本的参数是**包含所有人物子文件夹的数据集根目录**。
+    * 在重新生成列表前，请**手动删除**目标目录下（如 `data/face` 或 `data/my_faces`）已存在的 `train.list`, `test.list`, `acceptance.list` 和 `readme.json` 文件。
+    * `CreateDataList.py` 脚本的参数 `--data_root` 指定的是**包含所有人物子文件夹的数据集根目录**。
 
 5.  **修改配置**:
     * 打开 `configs/default_config.yaml`。
-    * 根据您的数据集修改 `num_classes` (类别数量)。
-    * 选择或自定义一个 `active_config` 块 (例如 `resnet_arcface_config`) 并按需调整其参数 (如 `learning_rate`, `epochs`, `batch_size` 等)。详情参阅 [⚙️ 配置管理](#️-配置管理)。
+    * 根据您的数据集修改 `num_classes` (类别数量，应与 `CreateDataList.py` 生成的 `readme.json` 中 `total_classes` 一致)。
+    * 选择或自定义一个 `active_config` 块 (例如 `resnet_arcface_steplr_config`) 并按需调整其参数 (如 `learning_rate`, `epochs`, `batch_size` 等)。详情参阅 [⚙️ 配置管理](#️-配置管理)。
 6.  **执行核心功能示例** (确保已激活虚拟环境):
     * **模型训练**:
         ```bash
         # 示例：训练配置文件中 active_config 指向的配置
-        python train.py --config_path configs/default_config.yaml --use_gpu --source manual --class_name face
+        # 注意：`--class_name` 参数不再需要，数据路径由 `data_dir` 和 `dataset_params` 中的列表文件名共同决定
+        python train.py --config_path configs/default_config.yaml --use_gpu --source manual
         # 示例：通过命令行指定活动配置块 (假设 resnet_arcface_steplr_config 已在YAML中定义)
-        # python train.py --config_path configs/default_config.yaml --active_config resnet_arcface_steplr_config --use_gpu --source manual --class_name face
+        # python train.py --config_path configs/default_config.yaml --active_config resnet_arcface_steplr_config --use_gpu --source manual
         ```
+    * **查看训练日志与实验对比 (VisualDL)**:
+        训练开始后或结束后，运行以下命令启动VisualDL服务：
+        ```bash
+        visualdl --logdir ./logs
+        ```
+        然后在浏览器中打开显示的地址 (通常是 `http://localhost:8040`)。
+        详细使用方法见 [📊 模型与实验 (Models and Experiments)](#-模型与实验-models-and-experiments) 下的 [VisualDL 日志查看与实验对比](#visualdl-日志查看与实验对比) 章节。
     * **创建人脸特征库** (如果使用ArcFace模型):
         ```bash
-        # 确保 model_path 指向您训练好的ArcFace模型
-        python create_face_library.py --config_path configs/default_config.yaml --model_path model/best_model_resnet_arcface_CosineAnnealingDecay_gpu_manual.pdparams --data_list_file data/face/trainer.list --use_gpu
+        # 确保 --active_config 与训练时一致，或 --model_path 指向您训练好的ArcFace模型
+        # --data_list_file 通常是训练列表，用于提取已知身份的特征
+        python create_face_library.py \\
+            --config_path configs/default_config.yaml \\
+            --active_config resnet_arcface_cosine_config \\
+            --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
+            --data_list_file data/face/train.list \\
+            --use_gpu
         ```
+        注意：`--model_path` 需要根据实际训练产出的路径进行修改，特别是时间戳部分。
     * **人脸识别**:
         ```bash
-        # 确保 model_path 和 image_path 根据实际情况调整
-        python infer.py --config_path configs/default_config.yaml --model_path model/best_model_resnet_arcface_CosineAnnealingDecay_gpu_manual.pdparams --image_path data/face/person1/1.jpg --use_gpu
+        # 确保 --active_config 与训练时一致，或 --model_path 指向对应模型
+        python infer.py \\
+            --config_path configs/default_config.yaml \\
+            --active_config resnet_arcface_cosine_config \\
+            --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
+            --image_path data/face/person1/some_test_image.jpg \\
+            --use_gpu
         ```
     * **人脸对比**:
         ```bash
-        # 确保 model_path 和图片路径根据实际情况调整
-        python compare.py --config_path configs/default_config.yaml --model_path model/best_model_resnet_arcface_CosineAnnealingDecay_gpu_manual.pdparams --img1 data/face/person1/1.jpg --img2 data/face/person2/1.jpg --use_gpu
+        # 确保 --active_config 与训练时一致，或 --model_path 指向对应模型
+        python compare.py \\
+            --config_path configs/default_config.yaml \\
+            --active_config resnet_arcface_cosine_config \\
+            --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
+            --img1 data/face/person1/img1.jpg \\
+            --img2 data/face/person2/1.jpg \\
+            --use_gpu
         ```
-
 </details>
 
 ## 📄 目录
@@ -113,6 +138,7 @@
 * [项目架构与技术栈](#项目架构与技术栈)
     * [模块依赖图 (概念)](#模块依赖图-概念)
     * [核心技术栈](#核心技术栈)
+    * [实验管理与可视化概览](#实验管理与可视化概览)
 * [项目结构说明](#项目结构说明)
 * [⚠️ 重要环境准备](#️-重要环境准备)
     * [1. 进入项目根目录](#1-进入项目根目录)
@@ -137,7 +163,7 @@
     * [7. 更换数据集流程](#7-更换数据集流程)
 * [📊 模型与实验 (Models and Experiments)](#-模型与实验-models-and-experiments)
     * [自动化正交训练测试](#自动化正交训练测试)
-    * [模型可视化对比](#模型可视化对比)
+    * [VisualDL 日志查看与实验对比](#visualdl-日志查看与实验对比)
 * [🛠️ 模型调优指南](#️-模型调优指南)
     * [参数调整示例](#参数调整示例)
     * [可调参数概览](#可调参数概览)
@@ -145,6 +171,7 @@
     * [独立测试集](#独立测试集)
     * [验收界面](#验收界面)
 * [💡 技术实现细节](#-技术实现细节)
+    * [VisualDL 日志记录](#visualdl-日志记录)
 * [🔮 下一步计划 (Future Plans)](#-下一步计划-future-plans)
     * [交互式Web应用与可视化](#1-交互式web应用与可视化)
     * [即时个性化识别](#2-即时个性化识别)
@@ -161,12 +188,11 @@
 ## 项目架构与技术栈
 
 ### 模块依赖图（概念）
-
 ```mermaid
 graph TD;
     subgraph 数据处理模块
         A[原始图像数据] --> B[CreateDataList.py];
-        B --> C[数据列表：trainer.list / test.list / readme.json];
+        B --> C[数据列表：train.list / test.list / acceptance.list / readme.json];
         C --> D[MyReader.py];
     end
 
@@ -186,13 +212,13 @@ graph TD;
         L --> F;
         L --> I;
         L --> M[utils/lr_scheduler_factory.py];
-        L --> N[模型检查点输出目录：model];
+        L --> VDL[VisualDL 日志目录: logs/];
+        L --> N[模型检查点输出目录]; # 具体路径由配置和组合名决定
 
         O[create_face_library.py] --> N;
         O --> C;
         O --> F;
         O --> I;
-        O --> P[人脸特征库文件：face_features.pkl];
 
         Q[infer.py] --> N;
         Q --> P;
@@ -231,7 +257,6 @@ graph TD;
 *(本图展示了本项目中各核心模块之间的依赖关系与数据流动，涵盖了数据预处理、模型训练、特征提取与识别推理等主要过程。)*
 
 ### 核心技术栈
-
 *   **核心框架**: 本项目基于 PaddlePaddle 深度学习框架开发，并在 paddlepaddle-gpu==3.0.0 环境下测试通过。
 *   **编程语言**: Python 3.8 及以上版本。
 *   **主要依赖**:
@@ -241,16 +266,23 @@ graph TD;
     *   `scikit-learn`: (可能用于评估指标，或辅助数据处理)。
     *   `tqdm`: 用于显示进度条。
     *   `numpy`: 数值计算基础库。
+    *   `visualdl`: PaddlePaddle官方可视化分析工具。
+
+### 实验管理与可视化概览
+本项目高度重视实验的可追溯性和结果的可视化分析。
+*   **结构化日志**: `train.py` 在执行时，会为每个超参数组合（骨干网络、损失函数、学习率调度器等）生成结构化的日志。这些日志保存在 `logs/` 目录下，遵循 `logs/<backbone>__<loss>__<lr_scheduler>/<timestamp>` 的命名约定。例如，一次 ResNet50 + ArcFace + Cosine 调度器的训练日志可能位于 `logs/resnet__arcface__CosineAnnealingDecay/20231028-153000/`。
+*   **VisualDL**: 我们使用 PaddlePaddle 的可视化工具 VisualDL 来解析这些日志。VisualDL 能够展示训练过程中的标量数据（如损失、准确率曲线）、图像数据（数据增强样本、模型输出）、参数分布直方图、网络结构以及超参数对比 (HParams)。
+*   **层次化 Tag**: 在每个运行的日志内部，关键指标使用统一的 Tag 命名，如 `Loss/Train_Epoch`, `Metric/Eval_Accuracy_Epoch`。这使得在 VisualDL 中可以方便地跨不同实验运行对比相同的指标。
+
+通过这种方式，我们可以有效地管理和比较多次实验的结果，从而指导模型优化。详细的 VisualDL 使用方法见 [VisualDL 日志查看与实验对比](#visualdl-日志查看与实验对比) 章节。
 
 ## 项目结构说明
-
 ```
-
 Face-Recognition/
 ├── attacks/                  # [新增/规划中] 对抗攻击实现模块
 │   └── gradient_attacks.py   # FGSM, PGD等基于梯度的攻击
 ├── configs/                  # 配置目录
-│   └── default_config.yaml   # 默认YAML配置文件 (包含多种预设模式及对抗训练配置)
+│   └── default_config.yaml   # 默认YAML配置文件
 ├── data/                     # 数据目录 (示例: data/face)
 │   └── face/                 # 示例人脸数据集 (可替换为 data/<config.class_name>)
 │       ├── person1/
@@ -259,28 +291,35 @@ Face-Recognition/
 │       └── person2/
 │           └── 1.jpg
 │           └── ...
-├── model/                    # 模型保存目录 (由配置文件中 model_save_dir 指定)
-├── models/                   # 存放骨干网络、[规划中]GAN生成器/判别器等定义
+├── logs/                     # VisualDL 日志保存根目录
+│   └── <backbone>__<loss>__<lr_scheduler>/ # 每个超参组合的父目录
+│       └── <timestamp>/          # 具体某次运行的日志 (包含VDL文件、模型检查点等)
+│           ├── checkpoints/      # 模型检查点
+│           │   ├── best_model_....pdparams
+│           │   └── checkpoint_....pdparams
+│           ├── model.pdmodel     # [如果导出成功] 用于网络结构可视化的模型
+│           ├── model.pdiparams   # [如果导出成功]
+│           └── ...               # VisualDL 的其他日志文件
+├── models/                   # 存放骨干网络定义
 │   ├── vgg_backbone.py       # VGG骨干网络定义
 │   ├── resnet_backbone.py    # ResNet骨干网络定义
-│   ├── generator_2d.py       # [规划中] 2D GAN 生成器
-│   └── discriminator_2d.py   # [规划中] 2D GAN 判别器
-├── heads.py                  # 存放模型头部定义 (如ArcFaceHead, CrossEntropyHead)
+├── heads.py                  # 存放模型头部定义
 ├── utils/                    # 存放工具/辅助模块
 │   ├── lr_scheduler_factory.py # 学习率调度器工厂
-│   └── visualization_utils.py  # [规划中] 可视化辅助脚本
+│   ├── checkpoint_manager.py # 检查点管理
+│   └── utils.py              # 通用工具函数 (如 get_git_commit_hash)
 ├── results/                  # 推理和对比结果图片保存目录
 ├── CreateDataList.py         # 创建数据列表脚本
 ├── MyReader.py               # 图像读取和预处理模块
 ├── config_utils.py           # 配置加载与合并工具模块
-├── train.py                  # 模型训练脚本 (将集成对抗训练逻辑)
-├── create_face_library.py    # 创建人脸特征库脚本 (用于ArcFace模型推理)
-├── infer.py                  # 人脸识别预测脚本 (将集成对抗测试)
+├── train.py                  # 模型训练脚本
+├── create_face_library.py    # 创建人脸特征库脚本
+├── infer.py                  # 人脸识别预测脚本
 ├── compare.py                # 人脸对比工具脚本
-├── train.sh                  # 自动化训练脚本 (用于本地或服务器批量训练)
-├── evaluate_robustness.py    # [规划中] 评估模型在对抗样本上性能的脚本
+├── train.sh                  # 自动化训练脚本
+├── acceptance_test.py        # 验收测试评估脚本
+├── log_tuning_run.py         # 手动记录调参日志脚本
 └── README.md                 # 项目说明文档 (本文档)
-
 ```
 
 ## ⚠️ 重要环境准备
@@ -331,92 +370,91 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_HOME/lib64:/usr/lib/wsl/lib
 适用于所有模式的基础配置，会被活动配置块中的同名参数覆盖。
 ```yaml
 # configs/default_config.yaml (部分示例)
+global_settings:
 use_gpu: true
 seed: 42
-image_size: 64
-data_dir: 'data'      # 数据集根目录
-class_name: 'face'    # 当前使用的数据集子目录名 (位于 data_dir 下，例如 data/face)
-model_save_dir: 'model'
-num_classes: 5        # 重要: 必须根据实际数据集修改! (由CreateDataList.py生成的readme.json中的total_classes确定)
-log_interval: 10
-resume: null          # null: 检查点存在则自动恢复, true: 强制恢复, false: 强制不恢复
+  image_size: 112      # 输入图像尺寸
+  data_dir: 'data'     # 数据集根目录
+  # class_name: 'face' # 不再需要全局 class_name, 由 MyReader.py 根据列表文件确定
+  model_save_dir: 'model' # 旧的保存目录，实际检查点保存在 visualdl_log_dir 下
+  num_classes: 100     # 重要: 必须根据实际数据集修改! (对应 readme.json 中的 total_classes)
+  epochs: 10           # 默认训练轮数
+  batch_size: 64
+  learning_rate: 0.1
+  optimizer_type: Momentum
+  lr_scheduler_type: StepDecay
+  log_interval: 10     # 控制台日志打印间隔 (batch steps)
+  resume: false        # 是否从检查点恢复
+  visualdl_log_dir: "logs" # VisualDL 日志保存的根目录
 
-# 对抗训练相关配置 (若启用 adversarial_training: true)
-adversarial_training: false
-attack_method: 'pgd'  # 可选: 'fgsm', 'pgd'
-# FGSM & PGD 攻击参数
-epsilon: 0.03         # 最大扰动量 (通常在 [0,1] 标准化空间下)
-# PGD 特定攻击参数
-alpha: 0.007          # PGD迭代步长
-num_iter: 10          # PGD迭代次数
+  dataset_params:
+    train_list: "train.list" # 列表文件名，会与 data_dir/<class_name_from_readme> 拼接
+    eval_list: "test.list"
+    acceptance_list: "acceptance.list"
+    num_workers: 4
+    mean: [0.5, 0.5, 0.5]
+    std: [0.5, 0.5, 0.5]
+
+  log_train_image_interval: 5   # 训练时记录图像的 epoch 间隔
+  log_eval_image_interval: 5    # 评估时记录图像的 epoch 间隔
+  log_histogram_interval: 2   # 记录参数直方图的 epoch 间隔
+# ... 其他全局设置 ...
 ```
+**注意**: `class_name` 的概念已弱化。`MyReader.py` 现在通过 `config.data_dir` 和 `config.dataset_params.train_list` (或 `eval_list` 等) 结合来定位数据列表文件。`CreateDataList.py` 生成的 `readme.json` 中的类别名信息主要用于参考。`train.py` 等脚本不再需要 `--class_name` 命令行参数。
 
 #### 活动配置选择 (`active_config`)
 修改此值以选择不同的预设配置块。
 ```yaml
-active_config: 'resnet_arcface_CosineAnnealingDecay_config' # 示例，应与train.sh中或自定义的配置块名匹配
+active_config: 'resnet_arcface_cosine_config' # 示例
 ```
-`train.sh` 脚本中定义了多种学习率调度器与骨干网络/损失的组合配置名，例如：
-* `vgg_ce_steplr_config`
-* `resnet_arcface_cosine_config` (此名称更规范，建议将旧的 `resnet_arcface_config` 重命名或作为基础模板)
-* ...等等共20种组合。请确保 `default_config.yaml` 中有这些配置块的定义。
 
 #### 具体配置块示例 (如 `resnet_arcface_cosine_config`)
 定义特定模型、损失、超参数组合。
 ```yaml
-resnet_arcface_cosine_config: # 名称应与 active_config 或 train.sh 中的一致
+resnet_arcface_cosine_config:
   model_type: 'resnet'
   loss_type: 'arcface'
-
-  model: # 骨干网络参数
-    resnet_params:
-      feature_dim: 512
-      nf: 32
-      n_resnet_blocks: 3
-  loss: # 损失函数/头部参数
-    arcface_params:
-      arcface_m1: 1.0
-      arcface_m2: 0.5 # ArcFace margin
-      arcface_m3: 0.0
-      arcface_s: 64.0 # ArcFace scale
-
-  # 训练超参数
+  model:
+    resnet_params: { feature_dim: 512, nf: 32, n_resnet_blocks: 3 }
+  loss:
+    arcface_params: { arcface_m1: 1.0, arcface_m2: 0.5, arcface_s: 64.0 }
 batch_size: 32
   epochs: 120
-  learning_rate: 0.001 # 初始学习率
+  learning_rate: 0.001
   optimizer_type: 'AdamW'
-  optimizer_params:
-    weight_decay: 0.0001
-
-  # 学习率调度器配置
-  lr_scheduler_type: 'CosineAnnealingDecay' # 此配置块的核心特征
+  optimizer_params: { weight_decay: 0.0001 }
+  lr_scheduler_type: 'CosineAnnealingDecay'
   lr_scheduler_params:
-    cosine_annealing:
-      T_max: 120 # 通常等于总epochs
-      eta_min: 0.0
-    warmup: # 可选的Warmup配置
-      use_warmup: false
-      warmup_steps: 500
-      start_lr: 0.00001
-
-  # 推理、对比、建库时的特定参数
+    cosineannealingdecay: { T_max: 120, eta_min: 0.0 } # 注意这里键名是 scheduler_type的小写
+    warmup: { use_warmup: true, warmup_steps: 500, start_lr: 0.00001 }
+  # ... 推理和建库相关路径，建议文件名包含配置信息 ...
   infer:
-    face_library_path: 'model/face_library_resnet_arcface_cosine.pkl' # 建议与模型配置关联
-    recognition_threshold: 0.5
-    label_file: 'readme.json' # 文件名，实际路径会拼接 data_dir/class_name
-    infer_visualize: true
-  compare:
-    compare_threshold: 0.8
-    compare_visualize: true
+    face_library_path: 'model/face_library_resnet_arcface_cosine.pkl'
+    # ...
   create_library:
-    output_library_path: 'model/face_library_resnet_arcface_cosine.pkl' # 建议与模型配置关联
+    output_library_path: 'model/face_library_resnet_arcface_cosine.pkl'
+```
+
+#### 学习率调度器配置 (`lr_scheduler_type`, `lr_scheduler_params`)
+*   `lr_scheduler_type`: 指定调度器类型，如 `StepDecay`, `MultiStepDecay`, `CosineAnnealingDecay`等。
+*   `lr_scheduler_params`: 包含一个与 `lr_scheduler_type` 同名（小写）的键，其值为该调度器的具体参数。还可包含一个可选的 `warmup` 子块。
+    ```yaml
+    lr_scheduler_type: 'MultiStepDecay'
+    lr_scheduler_params:
+      multistepdecay: # 键名与 lr_scheduler_type (小写) 对应
+        milestones: [30, 60, 90]
+        gamma: 0.1
+      warmup:
+        use_warmup: true
+        warmup_steps: 500
+        start_lr: 0.00001
 ```
 
 ### 命令行参数与覆盖规则
 *   `--config_path`: 指定YAML文件。
 *   `--active_config`: 覆盖YAML中的 `active_config`。
-*   `--use_gpu`/`--no-use_gpu`, `--resume`/`--no-resume`: 开关参数。
-*   其他参数如 `--learning_rate`, `--batch_size`, `--class_name <name>` 等可直接覆盖YAML中的值。
+*   `--use_gpu`/`--no-use_gpu` (或 `--use_gpu False`), `--resume`/`--no-resume`: 开关参数。
+*   其他参数如 `--learning_rate`, `--batch_size`, `--epochs`, `--visualdl_log_dir` 等可直接覆盖YAML中的值。
 *   **优先级**: 命令行参数 > 活动配置块 > 全局设置。
 
 ### 配置加载工具 (`config_utils.py`)
@@ -427,26 +465,32 @@ batch_size: 32
 [(返回目录)](#-目录)
 
 ### **1. 准备数据**
-将人脸数据按以下结构存放 (假设 `config.data_dir` 为 `data`, `config.class_name` 为 `face`):
+将人脸数据按以下结构存放 (假设 `config.data_dir` 为 `data`, 并且您的人脸类别子目录直接在 `data/face` 下):
 ```
-data/face/
+data/face/  # <--- 这个 'face' 目录将作为 CreateDataList.py 的输入
 ├── person1/
-│ ├── 1.jpg ...
+│   ├── 1.jpg ...
 ├── person2/
-│ ├── 1.jpg ...
+│   ├── 1.jpg ...
 └── ...
 ```
+`train.py` 会根据 `config.data_dir` (例如 `data`) 和 `config.dataset_params.train_list` (例如 `face/train.list`) 来定位实际的列表文件。确保 `CreateDataList.py` 生成的列表文件中的相对路径是正确的。
 
 建议预先对人脸进行检测和裁剪，确保人脸区域清晰且大小适中。
 
 ### **2. 创建数据列表 (`CreateDataList.py`)**
-此脚本遍历指定的数据集根目录，生成训练/测试列表和元数据文件。
+此脚本遍历指定的数据集根目录，生成训练/测试/验收集列表和元数据文件。
 ```bash
-# 示例: python CreateDataList.py data/face
-# 该命令会在 data/face/ 目录下生成 trainer.list, test.list, readme.json
-python CreateDataList.py <config.data_dir>/<config.class_name>
+# 示例: 为 data/face/ 目录下的类别子文件夹生成列表文件
+# 生成的列表会直接存放在 data/face/ 目录下
+# (如果存在旧文件，先手动删除: rm -f data/face/*.list data/face/readme.json)
+python CreateDataList.py --data_root data/face --train_ratio 0.7 --acceptance_ratio 0.1
+
+# 假设您的数据集类别在 data/my_dataset/ 下
+# python CreateDataList.py --data_root data/my_dataset
 ```
-**重要**: `readme.json` 中的 `total_classes` 值必须与您在 `configs/default_config.yaml` 中为训练设置的 `num_classes` **保持一致**。
+*   **重要**: `readme.json` 中的 `total_classes` 值必须与您在 `configs/default_config.yaml` 中为训练设置的 `num_classes` **保持一致**。
+*   生成的列表文件（如 `train.list`, `test.list`, `acceptance.list`）和元数据文件 (`readme.json`) 会保存在 `--data_root` 指定的目录中。
 
 ### **3. 模型训练 (`train.py`)**
 负责执行模型的训练流程。
@@ -454,106 +498,177 @@ python CreateDataList.py <config.data_dir>/<config.class_name>
 # 激活 paddle 环境后执行
 
 # 示例1: 使用YAML中默认的 active_config 进行训练
-python train.py --config_path configs/default_config.yaml --use_gpu --source manual --class_name face
+python train.py --config_path configs/default_config.yaml --use_gpu --source manual
 
-# 示例2: 通过命令行指定一个在YAML中定义好的活动配置块 (如train.sh中使用的)
-# 假设 resnet_arcface_cosine_config 是一个已定义的配置块名
-python train.py --config_path configs/default_config.yaml --active_config resnet_arcface_cosine_config --use_gpu --resume --source manual --class_name face
+# 示例2: 通过命令行指定一个在YAML中定义好的活动配置块
+python train.py --config_path configs/default_config.yaml --active_config resnet_arcface_cosine_config --use_gpu --resume --source manual
 ```
-*   `--source manual`: 标记为手动运行的训练（区别于`train.sh`中可能设置的`auto`）。
-*   `--class_name face`: 明确指定使用 `data/face` 目录下的数据列表和 `readme.json`。如果更换数据集，此参数也需相应更改。
-*   **对抗训练**: 如果在所选的活动配置块或全局设置中启用了 `adversarial_training: true` 并配置了相关攻击参数，训练脚本将自动进行对抗训练。评估阶段也会在对抗样本上进行测试（需要对应修改评估逻辑）。
-*   训练日志、模型检查点 (`checkpoint_*.pdparams`) 和最佳模型 (`best_model_*.pdparams`) 会保存在 `config.model_save_dir` 指定的目录中，文件名会包含模型类型、损失类型、学习率调度器类型、硬件和来源等信息。
+*   `--source manual`: 标记为手动运行的训练。
+*   模型训练产生的日志（用于VisualDL）、模型检查点 (`checkpoint_....pdparams`) 和最佳模型 (`best_model_....pdparams`) 会保存在 `config.visualdl_log_dir` 指定的目录下，并根据超参组合和时间戳创建子目录。例如：`logs/<backbone>__<loss>__<lr_scheduler>/<timestamp>/checkpoints/`。
+*   训练完成后，请参考 [VisualDL 日志查看与实验对比](#visualdl-日志查看与实验对比) 章节查看训练过程。
 
 ### **4. 创建人脸特征库 (针对ArcFace模型, `create_face_library.py`)**
 如果模型使用 ArcFace Loss 训练，则需要创建特征库用于后续1:N识别。
 ```bash
 # 激活 paddle 环境后执行
-# --model_path 应指向训练好的ArcFace模型
+# --model_path 应指向训练好的ArcFace模型的 .pdparams 文件
 # --data_list_file 通常是训练列表，用于提取已知身份的特征
-# output_library_path 在配置文件中指定，例如 infer.face_library_path 或 create_library.output_library_path
-python create_face_library.py \
-    --config_path configs/default_config.yaml \
-    --active_config resnet_arcface_cosine_config \
-    --model_path model/best_model_resnet_arcface_CosineAnnealingDecay_gpu_manual.pdparams \
-    --data_list_file data/face/trainer.list \
+# --active_config 用来加载模型结构和图像尺寸等参数
+python create_face_library.py \\
+    --config_path configs/default_config.yaml \\
+    --active_config resnet_arcface_cosine_config \\
+    --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
+    --data_list_file data/face/train.list \\
     --use_gpu
 ```
-生成的 `.pkl` 特征库文件路径由配置文件中 `active_config` 下的 `create_library.output_library_path` (或 `infer.face_library_path`) 指定。
+*   注意替换 `--model_path` 中的 `YYYYMMDD-HHMMSS` 为实际的时间戳。
+*   生成的 `.pkl` 特征库文件路径由配置文件中 `active_config` 下的 `create_library.output_library_path` 指定。确保该路径指向一个合理的位置，例如 `model/` 目录下并包含配置信息的文件名。
 
 ### **5. 人脸识别测试 (`infer.py`)**
 对单张人脸图像进行身份识别。
 ```bash
 # 激活 paddle 环境后执行
-python infer.py \
-    --config_path configs/default_config.yaml \
-    --active_config resnet_arcface_cosine_config \
-    --model_path model/best_model_resnet_arcface_CosineAnnealingDecay_gpu_manual.pdparams \
-    --image_path data/face/person1/some_test_image.jpg \
+python infer.py \\
+    --config_path configs/default_config.yaml \\
+    --active_config resnet_arcface_cosine_config \\
+    --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
+    --image_path data/face/person1/some_test_image.jpg \\
     --use_gpu
 ```
 *   ArcFace模型会将输入图像特征与特征库 (`infer.face_library_path` 指定) 比对。
 *   CrossEntropy模型直接输出分类概率最高的身份。
-*   **测试对抗样本**: （需修改`infer.py`）可增加参数 `--attack <method>` 来对输入图像生成对抗样本后再进行推理，以评估模型鲁棒性。
 
 ### **6. 人脸对比测试 (`compare.py`)**
 对比两张人脸图像的相似度。
 ```bash
 # 激活 paddle 环境后执行
-python compare.py \
-    --config_path configs/default_config.yaml \
-    --active_config resnet_arcface_cosine_config \
-    --model_path model/best_model_resnet_arcface_CosineAnnealingDecay_gpu_manual.pdparams \
-    --img1 data/face/person1/img1.jpg \
-    --img2 data/face/person1/img2.jpg \
+python compare.py \\
+    --config_path configs/default_config.yaml \\
+    --active_config resnet_arcface_cosine_config \\
+    --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
+    --img1 data/face/person1/img1.jpg \\
+    --img2 data/face/person2/1.jpg \\
     --use_gpu
 ```
 
 ### **7. 更换数据集流程**
 1.  **准备新数据集**: 按 [1. 准备数据](#1-准备数据) 的规范组织图像，例如存放在 `data/my_new_dataset`。
-2.  **创建数据列表**: 运行 `python CreateDataList.py data/my_new_dataset`。记下生成的 `readme.json` 中的 `total_classes`。
+2.  **创建数据列表**: 运行 `python CreateDataList.py --data_root data/my_new_dataset`。记下生成的 `readme.json` 中的 `total_classes`。
 3.  **配置YAML文件**:
     *   建议复制 `configs/default_config.yaml` 为例如 `configs/my_new_dataset_config.yaml` (或在默认文件中新增配置块)。
     *   修改配置：
         *   更新 `active_config` 指向新配置块。
-        *   在全局或活动配置块中，更新 `class_name: 'my_new_dataset'`。
+        *   在全局或活动配置块中，更新 `data_dir: 'data'` (如果列表仍在 `data` 下的子目录)。
+        *   更新 `dataset_params` 中的 `train_list`, `eval_list`, `acceptance_list` 指向新数据集的列表文件相对路径，例如 `my_new_dataset/train.list`。
         *   **非常重要**: 更新 `num_classes` 为新数据集的实际类别总数。
-        *   (可选) 为新模型指定新的 `model_save_dir`。
-        *   更新 `infer`, `compare`, `create_library` 配置块中相关的 `label_file` (应为 `readme.json`) 和特征库路径，使其指向新数据集的相关文件和期望路径 (例如，`face_library_path: 'model/face_library_my_new_dataset.pkl'`)。
+        *   (可选) 为新模型指定新的 `visualdl_log_dir` 或确保组合名能区分。
+        *   更新 `infer`, `compare`, `create_library` 配置块中相关的 `label_file` (应为 `my_new_dataset/readme.json`) 和特征库路径。
 4.  **开始新数据集训练**:
     ```bash
     # 激活 paddle 环境后执行
-    python train.py --config_path configs/my_new_dataset_config.yaml --active_config <your_new_config_block> --use_gpu --source manual --class_name my_new_dataset
+    python train.py --config_path configs/my_new_dataset_config.yaml --active_config <your_new_config_block> --use_gpu --source manual
     ```
 
 ## 📊 模型与实验 (Models and Experiments)
 [(返回目录)](#-目录)
 
 ### 自动化正交训练测试
-本项目通过 `train.sh` 脚本实现了对 4种骨干网络/损失函数组合 (VGG+CE, VGG+ArcFace, ResNet+CE, ResNet+ArcFace) 与 5种学习率调度器 (StepDecay, MultiStepDecay, CosineAnnealingDecay, ReduceOnPlateau, CosineAnnealingWarmRestarts) 的共20种模型配置进行自动化批量训练和测试。
-
+本项目通过 `train.sh` 脚本实现了对多种骨干网络、损失函数和学习率调度器组合的自动化批量训练。
 *   **脚本**: `train.sh` (请根据您的环境调整其中的 `PROJECT_DIR`, `VENV_PATH` 等)。
-*   **配置**: `train.sh` 中的 `CONFIG_NAMES_TO_TRAIN` 数组定义了要训练的配置块名称，这些名称必须在 `configs/default_config.yaml` 中有对应的配置块定义。每个配置块通常指定了骨干网络、损失类型、学习率调度器类型及其参数。
-*   **日志**: 每个训练组合的日志会分别保存在 `train.sh` 中 `LOG_DIR` 指定的目录下，方便追踪和分析。文件名通常包含配置名、硬件和时间戳。
-*   **输出**: 训练完成后，每个配置会生成对应的 `checkpoint_*.pdparams` 和 `best_model_*.pdparams` 文件，以及相应的 `.json` 元数据文件，记录了训练的详细信息和最终性能。
-*   **观察与结论**: （此处应根据您的实际测试结果填写，例如：在LFW验证集子集上，ResNet50+ArcFace结合CosineAnnealingDecay（预热5轮）在100轮训练后达到了XX.X%的准确率，而VGG16+CrossEntropy则为YY.Y%。观察到ReduceLROnPlateau在某些情况下收敛较慢等。）
+*   **配置**: `train.sh` 中的 `CONFIG_NAMES_TO_TRAIN` 数组定义了要训练的配置块名称，这些名称必须在 `configs/default_config.yaml` 中有对应的配置块定义。
+*   **日志生成**: `train.sh` 脚本执行每个组合时，会调用 `train.py`。`train.py` 会自动在 `config.visualdl_log_dir` (默认为 `logs/`) 下，根据 `<backbone>__<loss>__<lr_scheduler>/<timestamp>` 结构创建独立的日志目录。
+*   **统一查看**: 所有这些独立运行的日志都可以通过 VisualDL 一起加载和对比，只需将 VisualDL 指向 `logs/` 根目录。
+*   **输出**: 每个训练组合会生成对应的检查点和最佳模型文件，保存在其各自的日志子目录下的 `checkpoints/` 中。
 
-这一自动化测试为模型选择和超参数调整提供了坚实的数据基础。
+### VisualDL 日志查看与实验对比
+VisualDL 是 PaddlePaddle 提供的强大的可视化分析工具，本项目充分利用其记录和展示实验过程。
 
-### 模型可视化对比
-为了更直观地分析和比较不同模型的训练动态和最终性能，建议采用以下可视化方法：
+**1. 日志生成说明**
+*   `train.py` 在运行时，会自动根据配置文件中的 `visualdl_log_dir` (默认为 `logs/`) 和当前的超参数组合（骨干、损失、学习率调度器）及时间戳，创建独立的日志目录。
+    *   例如，一次VGG + CrossEntropy + StepDecay的训练日志可能保存在：`logs/vgg__cross_entropy__StepDecay/20231028-120000/`。
+*   这个目录中包含了 VisualDL 所需的所有数据文件，记录了标量（损失、准确率）、图像、直方图、网络结构（如果导出成功）和超参数信息。
 
-*   **训练/验证曲线**:
-    *   损失曲线 (Loss vs. Epochs/Steps): 对比不同模型在训练集和验证集上的损失下降速度和最终收敛值。
-    *   准确率曲线 (Accuracy vs. Epochs/Steps): 对比不同模型在训练集和验证集上的准确率变化情况和最终性能。
-*   **学习率变化曲线** (Learning Rate vs. Epochs/Steps):
-    *   对于使用了不同学习率调度器的模型，可视化学习率的实际变化过程。
-*   **关键指标对比图**:
-    *   柱状图/雷达图: 对比所有模型在最终验证集上的准确率、平均损失等。
-*   **工具**:
-    *   **Matplotlib/Seaborn**: 训练结束后，编写Python脚本读取 `train.py` 输出的日志文件或保存的元数据（.json文件），生成对比图表。
-    *   **VisualDL (PaddlePaddle)**: 在 `train.py` 中集成 `paddle.callbacks.VisualDL`，可以在训练过程中实时监控各项指标，并方便地在VisualDL界面对比多次不同运行（不同模型）的曲线。
-    *   **交互式Web应用**: (详见 [🔮 下一步计划 (Future Plans)](#-下一步计划-future-plans))
+**2. 启动 VisualDL 服务**
+在项目根目录下，激活虚拟环境后，运行以下命令：
+```bash
+visualdl --logdir ./logs
+```
+*   `--logdir ./logs` 参数告诉 VisualDL扫描 `logs` 目录及其所有子目录以查找实验数据。
+*   启动成功后，终端会显示访问地址，通常是 `http://localhost:8040` 或类似地址。在浏览器中打开此地址即可进入 VisualDL Web UI。
+
+**3. 界面导航概览**
+VisualDL界面通常包含以下主要面板：
+*   **标量数据 (Scalar)**: 显示训练过程中标量指标（如损失函数值、准确率、学习率）随训练步数或epoch的变化曲线。**这是进行实验对比的核心面板。**
+*   **图像 (Image)**: 展示训练过程中记录的图像数据，如数据增强后的样本、模型预测的可视化结果等。
+*   **直方图 (Histogram)**: 显示模型权重、梯度等参数的分布情况，有助于分析模型的训练状态和潜在问题。
+*   **网络结构 (Graph)**: [如果模型导出成功] 可视化模型的计算图结构。
+*   **超参数 (HParams)**: 以表格和并行坐标图的形式展示不同超参数组合与最终性能指标的关联，便于快速筛选和比较不同配置。
+
+**4. 核心：如何进行实验对比 (Scalar 面板)**
+目标是能够在同一个图表中叠加显示来自不同实验运行（即不同超参数组合或不同时间戳的同一组合）的同一个指标曲线。
+
+*   **步骤 1: 选择数据流 (Runs)**
+    *   进入VisualDL后，通常在界面的某个位置（可能是左上角或有专门的"运行记录"/"Runs"选项卡/下拉菜单）会列出所有VisualDL从 `--logdir` 中扫描到的独立实验运行。
+    *   这些运行的名称通常对应于您的日志子目录名，例如 `vgg__cross_entropy__StepDecay/20231028-120000`， `resnet__arcface__CosineAnnealingDecay/20231028-130000` 等。
+    *   **勾选您想要对比的多个实验运行。** 这是实现跨实验对比的第一步。
+
+*   **步骤 2: 进入"标量数据 (Scalar)"面板并关注左侧 Tag 导航区**
+    *   在Scalar面板的左侧，会有一个Tag导航区域。这个区域会以树状结构或列表形式展示所有已选Runs中记录过的标量数据的Tag。
+    *   由于我们在`train.py`中对每个run内部的标量Tag进行了简化（例如 `Loss/Train_Epoch`, `Metric/Eval_Accuracy_Epoch`），这些核心指标名称应该会清晰地显示在这里。
+
+*   **步骤 3: 利用Tag树状结构或搜索框查找并勾选目标指标的Tag**
+    *   展开Tag树状结构，找到您感兴趣的指标，例如 `Loss/Train_Epoch`。
+    *   或者，在Tag导航区上方的搜索框中输入指标的Tag名称或部分名称（如 `Eval_Accuracy`）进行快速筛选。
+
+*   **步骤 4: 勾选来自不同Runs的同一个指标Tag，实现曲线叠加对比**
+    *   **关键操作**：当您在左侧Tag导航区找到目标指标（如 `Loss/Train_Epoch`）后，如果这个指标在您第一步选中的多个Runs中都存在，您会看到它在每个Run的条目下都出现。
+    *   **分别勾选这些不同Runs下的同一个指标Tag。**
+    *   例如，勾选：
+        *   `vgg__cross_entropy__StepDecay/20231028-120000` 下的 `Loss/Train_Epoch`
+        *   `resnet__arcface__CosineAnnealingDecay/20231028-130000` 下的 `Loss/Train_Epoch`
+    *   当您这样做之后，VisualDL的右侧主图表区域会自动将这两条（或多条）`Loss/Train_Epoch`曲线绘制在同一个图表中，并用不同颜色加以区分。这就实现了跨实验的同指标对比。
+
+*   **右侧图表区域与筛选**:
+    *   右侧是主要的图表显示区域。
+    *   图表上方的筛选框（如果有）通常用于对当前图表中 *已经显示* 的曲线进行进一步的过滤，它与左侧选择要 *加载哪些* 曲线到图表中的功能是不同的。
+
+**5. HParams 插件的使用**
+*   **启用**: 标准的VisualDL安装通常会自动识别并启用HParams功能，无需额外配置 `--plugins hparams`（旧版VisualDL可能需要）。
+*   **数据来源**: HParams面板的数据来源于 `train.py` 中通过 `log_writer.add_hparams(hparams_dict, metrics_list)` 记录的超参数组合 (`hparams_dict`) 和对应的最终性能指标 (`metrics_list` 中的值，如 `Loss/Eval_Epoch` 的最终值)。
+*   **功能**:
+    *   **表格视图**: 清晰列出每次运行的超参数值和对应的性能指标结果。
+    *   **平行坐标图**: 直观展示不同超参数维度对性能指标的影响趋势。
+    *   **筛选与跳转**: 您可以根据超参数或性能指标的范围筛选感兴趣的运行，并从HParams面板快速跳转到对应运行的标量曲线面板查看详细训练过程。
+
+#### VisualDL 图像数据 (Image) 查看详解
+
+VisualDL 的"图像 (Image)"面板允许您可视化在训练和评估过程中记录的图片样本。这对于检查数据预处理、数据增强（主要在训练阶段）的效果，以及观察模型在不同阶段实际接收到的输入非常有用。
+
+**如何使用:**
+
+1.  **导航至图像面板**: 在 VisualDL 界面顶部导航栏中选择"图像 (Image)"选项卡。
+
+2.  **选择运行实例**: 与标量数据类似，确保您已在左侧的运行列表 (Runs) 中勾选了想要查看的实验运行实例。一个运行实例通常对应于一次 `train.py` 的执行，其名称基于超参数组合和时间戳 (例如 `ResNet__ArcFace__StepDecay/20231027-153000`)。
+
+3.  **理解图像标签层级**: 图片数据现在按以下层级结构组织，方便您筛选和查看：
+    *   **主要类别 (Train/Eval/Acceptance)**: 图片首先会按照记录的阶段分为三大类：
+        *   `Train`: 包含了训练过程中，在每个指定图片记录间隔的轮次 (epoch) 开始时，从当前批次 (batch) 中抽取的若干（通常是4张）经过数据增强的样本图片。
+        *   `Eval`: 包含了评估过程中，在每个指定图片记录间隔的轮次 (epoch) 开始时，从当前评估批次 (batch) 中抽取的若干原始（通常也为4张，仅进行了必要的resize和归一化，无增强）样本图片。
+        *   `Acceptance` (待实现): 如果在验收测试阶段也配置了图片记录，相关图片会显示在此类别下（当前版本的 `train.py` 未直接集成此阶段的图片日志，但如果 `acceptance_test.py` 或类似脚本被修改为向相同的 VisualDL 实验记录日志，则会在此出现）。
+    *   **任务/数据集类别 (Task/Dataset Class)**: 在每个主要类别 (如 `Train`) 下，图片会根据其所属的任务或数据集类别进一步分组。这个类别名通常来自配置文件中的 `class_name` 字段 (例如，如果 `config.class_name` 为 `face`，则您会看到如 `Train/face/...` 的路径)。这使得当您处理多个数据集或任务时，可以方便地分别查看它们的图像数据。
+    *   **具体图片样本**: 在任务类别下，您会看到具体的图片标签，例如 `Epoch1_Sample0`, `Epoch1_Sample1` 等，分别代表在第1个轮次记录的第0个和第1个样本图片。
+
+4.  **使用滑块查看不同轮次 (Epoch) 的图片**: 面板顶部通常会有一个滑块。通过拖动此滑块，您可以选择不同的 **轮次 (Epoch)**（即图片记录时的 `step` 值），从而查看在不同训练阶段记录的图片。这对于观察模型输入随时间（训练进程）的变化特别有用。
+
+5.  **图片显示**: 点击具体的图片标签后，对应的图片样本会显示在主区域。您可以同时选择和比较来自不同运行实例、不同阶段或不同轮次的图片。
+
+通过这种方式，您可以直观地监控数据流水线，确保模型看到的是预期的数据，并对数据增强策略的有效性进行评估。
+
+#### VisualDL 直方图 (Histogram) 查看
+这两个面板同样会根据您选择的Runs来展示数据。
+*   **Histogram**: 可以查看特定实验运行中，关键层权重和梯度的分布随训练的变化，有助于诊断训练问题。Tag通常是 `Hist/<layer_name>/Parameters` 或 `Hist/<layer_name>/Gradients`。
+
+通过上述方法，您可以充分利用VisualDL对不同模型配置和训练运行进行深入的比较和分析。
 
 ## 🛠️ 模型调优指南
 [(返回目录)](#-目录)
@@ -563,7 +678,7 @@ python compare.py \
 修改 `learning_rate` 并指定一个特定的配置块进行训练：
 ```bash
 # 激活 paddle 环境后执行
-python train.py --config_path configs/default_config.yaml --active_config resnet_arcface_cosine_config --learning_rate 0.0005 --use_gpu --class_name face
+python train.py --config_path configs/default_config.yaml --active_config resnet_arcface_cosine_config --learning_rate 0.0005 --use_gpu
 ```
 
 ### 可调参数概览
@@ -571,31 +686,36 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 *   **模型结构参数**:
     *   `model_type`: 'vgg' 或 'resnet'。
     *   `model.resnet_params`: `feature_dim` (输出特征维度), `nf` (初始通道数), `n_resnet_blocks` (深度)。
-    *   `model.vgg_params`: `dropout_rate`。
+    *   `model.vgg_params`: `dropout_rate`, `feature_dim`。
 *   **损失函数参数** (主要针对ArcFace):
     *   `loss.arcface_params`: `arcface_s` (scale), `arcface_m2` (margin)。
 *   **数据相关**: `image_size`，数据增强策略 (目前在 `MyReader.py` 中定义，未来可配置化)。
-*   **对抗训练参数** (如果启用): `epsilon`, `alpha`, `num_iter`。
 
-进行调优时，建议采用控制变量法，并详细记录实验结果。
+进行调优时，建议采用控制变量法，并详细记录实验结果（可使用 `log_tuning_run.py` 或 VisualDL 的 HParams 功能）。
 
 ## 🛡️ 验收与评估 (Acceptance and Evaluation)
 [(返回目录)](#-目录)
 
 ### 独立测试集
-采用与训练集和验证集（即`train.py`中`test_loader`使用的数据）完全独立的测试集进行最终的模型性能评估，以获得无偏结果。
+采用与训练集和验证集（即`train.py`中`eval_loader`使用的数据，通常对应 `test.list`）完全独立的验收数据集进行最终的模型性能评估，以获得无偏结果。
 
-*   **创建**: 从总数据中预留一部分作为最终验收测试集，例如 `data/acceptance_test_set/`。使用 `CreateDataList.py data/acceptance_test_set` 生成其独立的列表文件 `acceptance_test.list` 和 `readme.json`。
-*   **评估脚本**: 可以创建一个新的评估脚本 `evaluate_on_acceptance_set.py` (可基于 `infer.py` 的逻辑进行修改)。该脚本应：
-    1.  加载最终选定的最佳模型 (例如 `best_model_*.pdparams`)。
-    2.  读取验收测试集的列表文件。
+*   **创建**: 从总数据中预留一部分作为最终验收测试集，例如 `data/face_acceptance_data/`。使用 `CreateDataList.py --data_root data/face_acceptance_data --train_ratio 0 --acceptance_ratio 0` (或调整比例以仅生成一个列表，例如都给test) 生成其独立的列表文件，例如 `data/face_acceptance_data/acceptance.list` 和 `readme.json`。
+*   **评估脚本**: `acceptance_test.py` 脚本用于此目的。它会：
+    1.  加载最终选定的最佳模型 (通过配置文件和命令行参数指定)。
+    2.  读取验收测试集的列表文件 (由 `config.dataset_params.acceptance_list` 指定)。
     3.  遍历列表中的图片，执行人脸识别（1:N对比特征库）或分类。
-    4.  计算标准评估指标，如Top-1/Top-5准确率（分类任务），或人脸验证的TAR@FAR（如果实现1:1验证逻辑）。
+    4.  计算标准评估指标，如Top-1/Top-5准确率（分类任务），或人脸验证的TAR@FAR。
     5.  输出最终性能报告。
 *   **执行示例**:
 ```bash
     # 激活 paddle 环境后执行
-    python evaluate_on_acceptance_set.py --config_path <指向包含模型信息的配置文件> --model_path <最终模型路径> --acceptance_data_list data/acceptance_test_set/acceptance_test.list --acceptance_label_file data/acceptance_test_set/readme.json [--use_gpu]
+    # 确保 active_config 指向的模型配置与 model_path 匹配
+    # 确保配置文件中 dataset_params.acceptance_list 指向正确的验收列表
+    python acceptance_test.py \\
+        --config_path configs/default_config.yaml \\
+        --active_config resnet_arcface_cosine_config \\
+        --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
+        --use_gpu
 ```
 
 ### 验收界面
@@ -604,7 +724,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 *   **功能**:
     *   上传单张图片进行人脸识别（显示预测身份和置信度/相似度）。
     *   上传两张图片进行人脸对比（显示相似度和是否同一人判断）。
-*   **实现技术推荐**:
+*   **技术选型推荐**:
     *   **Streamlit / Gradio**: Python库，可以非常快速地为机器学习模型创建交互式Web应用界面，代码量少，非常适合快速原型和演示。**强烈推荐优先考虑！**
     *   **Flask/FastAPI + 前端 (HTML/JS/CSS)**: 更灵活，但开发周期更长。后端提供API接口，前端负责展示。
 
@@ -617,11 +737,18 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 *   **模型头部与损失函数**: `heads.py` 中封装了如 `ArcFaceHead` (利用 `paddle.nn.functional.margin_cross_entropy`) 和 `CrossEntropyHead` (标准线性分类头+交叉熵损失)。
 *   **模型组装工厂**: `model_factory.py` 中的 `get_backbone` 和 `get_head` 根据配置动态创建骨干网络和头部模块实例。
 *   **配置系统**: `config_utils.py` 中的 `load_config` 负责加载和合并来自YAML文件和命令行参数的配置，生成易于访问的 `ConfigObject`。
-*   **数据处理与加载**: `CreateDataList.py` 生成训练/测试列表和元数据文件 (`readme.json`)。`MyReader.py` 实现 `paddle.io.Dataset` 和 `DataLoader`，负责图像读取、预处理（包括缩放、标准化）和数据增强。
+*   **数据处理与加载**: `CreateDataList.py` 生成训练/测试/验收集列表和元数据文件 (`readme.json`)。`MyReader.py` 实现 `paddle.io.Dataset` 和 `DataLoader`，负责图像读取、预处理（包括缩放、标准化）和数据增强。
 *   **学习率调度**: `utils/lr_scheduler_factory.py` 根据配置创建学习率调度器实例，支持多种策略和Warmup。
-*   **模型持久化**: 模型和检查点以字典形式通过 `paddle.save` 保存，包含模型权重 (`backbone`, `head`)、优化器状态、学习率调度器状态、当前epoch、最佳准确率以及完整的训练配置 (`config`)快照。同时保存 `.json` 元数据文件记录训练详情。
+*   **检查点管理**: `utils/checkpoint_manager.py` 负责在训练过程中保存和加载模型权重、优化器状态、学习率调度器状态以及训练元数据。检查点保存在每个运行实例的日志目录下的 `checkpoints/` 子目录中。
+*   **VisualDL 日志记录**:
+    *   `train.py` 中，通过 `visualdl.LogWriter(logdir=current_logdir)` 初始化日志记录器，其中 `current_logdir` 指向 `logs/<combo_name>/<timestamp>/`。
+    *   标量数据通过 `log_writer.add_scalar(tag="Category/MetricName", value=..., step=...)` 记录。
+    *   图像数据通过 `log_writer.add_image(...)` 记录。
+    *   直方图数据通过 `log_writer.add_histogram(...)` 记录。
+    *   超参数组合和最终指标通过 `log_writer.add_hparams(hparams_dict, metrics_list, step=0)` 记录，用于 HParams 面板。
+    *   导出的网络结构模型路径（如果成功）通过 `log_writer.add_text(tag='GraphInfo/ExportedModelPath', ...)` 记录。
 *   **[规划中] 对抗攻击**: `attacks/gradient_attacks.py` 将实现FGSM, PGD等攻击。
-*   **[规划中] 对抗训练**: `train.py` 将集成对抗样本生成逻辑，在训练步骤中使用对抗样本或混合样本进行训练。
+*   **[规划中] 对抗训练**: `train.py` 将集成对抗样本生成逻辑。
 
 ## 🔮 下一步计划 (Future Plans)
 [(返回目录)](#-目录)
@@ -682,7 +809,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
         *   计算指标：如攻击成功率（模型对原始样本预测正确，但对相应对抗样本预测错误的比率）、在对抗样本上的准确率。
         *   可视化：添加功能以并列展示原始人脸图像、计算出的扰动（可能需要放大以便观察）、以及最终的对抗样本图像。
     *   **更新文档 (`README.md`)**:
-        *   在本文档中（例如，在“功能特性”或创建一个新的专门章节“对抗鲁棒性研究”）详细说明已实现的对抗攻击方法、对抗训练策略。
+        *   在本文档中（例如，在"功能特性"或创建一个新的专门章节"对抗鲁棒性研究"）详细说明已实现的对抗攻击方法、对抗训练策略。
         *   解释如何配置和运行相关脚本（如何生成对抗样本，如何进行对抗训练，如何评估鲁棒性）。
         *   总结实验结果和观察到的现象。
 
@@ -703,8 +830,8 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
     *   `numpy` ABI 错误: 尝试 `pip uninstall numpy -y && pip install numpy==1.26.4`。
     *   `ImportError: libcudart.so.X.X`: 检查 `CUDA_HOME` 和 `LD_LIBRARY_PATH`。
 *   **数据准备问题**:
-    *   `CreateDataList.py` 未生成列表或 `readme.json` 不符合预期: 检查数据集目录结构和图片。
-    *   训练时找不到图片: 检查 `data_dir`, `class_name` 配置及列表文件中的路径。
+    *   `CreateDataList.py` 未生成列表或 `readme.json` 不符合预期: 检查数据集目录结构和图片。确保 `--data_root` 指向包含类别子文件夹的目录。
+    *   训练时找不到图片或列表: 检查 `config.data_dir` 和 `config.dataset_params.*_list` 的配置，确保它们能正确拼接成列表文件的完整路径 (例如 `data/face/train.list`)。
 *   **训练过程问题**:
     *   不收敛，Loss不降/上升: 学习率过高？数据问题？ArcFace参数不当？
     *   GPU显存不足 (OOM): 减小 `batch_size` 或 `image_size`，或使用更轻量模型。
@@ -713,6 +840,9 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
     *   特征库生成不准确: 确保模型已正确训练。
     *   推理时都识别为"未知": 特征库问题？阈值过高？
 *   **图像大小不一致错误**: 确保训练、建库、推理、对比各阶段 `image_size` 一致。模型文件会保存训练时的 `image_size` 并优先使用。
+*   **VisualDL 相关**:
+    *   VisualDL 看不到数据: 确认 `--logdir` 指向正确的根目录 (通常是 `logs/`)。确认 `train.py` 是否已成功执行并生成了日志文件。
+    *   VisualDL 网络结构不显示: 检查训练结束时模型导出部分是否有错误。确认 `model_for_graph.pdmodel` 和 `.pdiparams` 是否已正确生成在每个运行的日志子目录下。
 
 *(详细内容请参考原FAQ部分，并根据实际遇到的问题持续更新)*
 
@@ -723,8 +853,8 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 2.  确保配置文件 (`configs/default_config.yaml`) 中的 `num_classes` 与您数据集（由 `CreateDataList.py` 生成的 `readme.json` 中的 `total_classes` 定义）的实际类别总数匹配。
 3.  训练、所有后续操作（推理、对比、建库）中使用的 `image_size` 必须保持一致。脚本会优先使用模型文件中保存的 `image_size`。
 4.  ArcFace模型进行推理前，必须先使用 `create_face_library.py` 针对该模型和目标身份数据生成特征库。
-5.  所有脚本的路径参数（如模型路径、数据列表路径、图像路径）默认是相对于项目根目录的。
-6.  定期清理 `results/` 和 `model/` 目录中不再需要的旧文件，以节省空间。
+5.  所有脚本的路径参数（如模型路径、数据列表路径、图像路径）默认是相对于项目根目录的，或者由配置文件中的 `data_dir` 等参数组合而成。
+6.  定期清理 `logs/` 目录中不再需要的旧实验运行子目录，以节省空间。
 7.  当修改 `configs/default_config.yaml` 后，如果 `train.sh` 正在后台运行，可能需要重启脚本以加载最新配置（除非脚本内部有重载逻辑）。
 
 ## 🤝 贡献 (Contributing)

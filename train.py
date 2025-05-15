@@ -100,8 +100,9 @@ def evaluate(model: nn.Layer, head: nn.Layer | None, eval_loader: paddle.io.Data
                     img_unnormalized_chw = img_np_chw * std_unnorm + mean_unnorm
                     img_uint8_chw = np.clip(img_unnormalized_chw * 255.0, 0, 255).astype(np.uint8)
                     img_hwc_uint8 = np.transpose(img_uint8_chw, (1, 2, 0))
+                    task_name = config.class_name if hasattr(config, 'class_name') and config.class_name else "unknown_dataset"
                     log_writer.add_image(
-                        tag=f"{base_tag_prefix}/Image/Eval_Epoch{epoch + 1}_Sample{i}",
+                        tag=f"Eval/{task_name}/Epoch{epoch + 1}_Sample{i}",
                         img=img_hwc_uint8,
                         step=epoch + 1
                     )
@@ -197,8 +198,9 @@ def train_one_epoch(model: nn.Layer, head: nn.Layer | None, train_loader: paddle
                 img_unnormalized_chw = img_np_chw * std_unnorm + mean_unnorm
                 img_uint8_chw = np.clip(img_unnormalized_chw * 255.0, 0, 255).astype(np.uint8)
                 img_hwc_uint8 = np.transpose(img_uint8_chw, (1, 2, 0))
+                task_name = config.class_name if hasattr(config, 'class_name') and config.class_name else "unknown_dataset"
                 log_writer.add_image(
-                    tag=f"Image/Train_Augmented_Epoch{epoch+1}_Sample{i}",
+                    tag=f"Train/{task_name}/Epoch{epoch+1}_Sample{i}",
                     img=img_hwc_uint8,
                     step=epoch + 1
                 )
@@ -224,19 +226,25 @@ def train_one_epoch(model: nn.Layer, head: nn.Layer | None, train_loader: paddle
         print(f"\n--- Epoch {epoch + 1}/{config.epochs} 记录参数直方图 ---")
         for name, param in model.named_parameters():
             if param.trainable:
-                log_writer.add_histogram(
-                    tag=f"Hist/{name.replace('.', '/')}/Parameters",
-                    values=param.numpy(),
-                    step=epoch + 1,
-                    buckets=10
-                )
-                if param.grad is not None:
+                try:
                     log_writer.add_histogram(
-                        tag=f"Hist/{name.replace('.', '/')}/Gradients",
-                        values=param.grad.numpy(),
+                        tag=f"Hist/{name.replace('.', '/')}/Parameters",
+                        values=param.numpy(),
                         step=epoch + 1,
                         buckets=10
                     )
+                except Exception as e_hist_param:
+                    print(f"警告: 记录参数直方图失败 (参数: {name}): {e_hist_param}")
+                if param.grad is not None:
+                    try:
+                        log_writer.add_histogram(
+                            tag=f"Hist/{name.replace('.', '/')}/Gradients",
+                            values=param.grad.numpy(),
+                            step=epoch + 1,
+                            buckets=10
+                        )
+                    except Exception as e_hist_grad:
+                        print(f"警告: 记录梯度直方图失败 (参数: {name}): {e_hist_grad}")
         log_writer.flush()
         print(f"--- Epoch {epoch + 1}/{config.epochs} 参数直方图记录完毕 ---")
 
@@ -250,15 +258,11 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     loss_fn_type = final_config.loss_type
     lr_scheduler_name = final_config.lr_scheduler_type
 
-    # Log directory structure: <base_log_dir>/<backbone>__<loss>__<lr_scheduler>/<timestamp>
     combo_dir_name = f"{backbone_type}__{loss_fn_type}__{lr_scheduler_name}"
     timestamp_str = datetime.now().strftime("%Y%m%d-%H%M%S")
-    current_run_dir_name = timestamp_str # Each run gets a timestamped sub-directory
+    current_run_dir_name = timestamp_str
     
     base_log_dir = final_config.visualdl_log_dir if hasattr(final_config, 'visualdl_log_dir') and final_config.visualdl_log_dir else "logs"
-    
-    # The directory passed to LogWriter should be the specific run's directory
-    # logs/vgg__cross_entropy__StepDecay/20231027-103000
     current_logdir = os.path.join(base_log_dir, combo_dir_name, current_run_dir_name)
 
     os.makedirs(current_logdir, exist_ok=True)
@@ -276,7 +280,7 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
         'seed': final_config.seed,
         'image_size': final_config.image_size,
         'num_classes': final_config.num_classes,
-        'log_dir_combo': combo_dir_name, # Add combo name for easier grouping in analysis if needed
+        'log_dir_combo': combo_dir_name,
         'run_timestamp': timestamp_str
     }
     if hasattr(final_config, 'optimizer_params') and final_config.optimizer_params:
@@ -287,7 +291,6 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     if active_config_name:
         hparams_dict['active_config_yaml'] = active_config_name
     
-    # Metrics for HParams should be simple names, as they are logged within each run's unique directory
     tracked_metrics_for_hparams = [
         'Loss/Train_Epoch',
         'Metric/Train_Accuracy_Epoch',
@@ -296,9 +299,7 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
         'LR/EpochEnd'
     ]
     try:
-        # For HParams, we log the hyperparameters for *this specific run*.
-        # VisualDL's HParams dashboard is designed to compare across different runs (log directories).
-        log_writer.add_hparams(hparams_dict=hparams_dict, metrics_list=tracked_metrics_for_hparams, step=0) # step=0 for hparams
+        log_writer.add_hparams(hparams_dict=hparams_dict, metrics_list=tracked_metrics_for_hparams)
         print("超参数已记录到 VisualDL HParams。")
     except Exception as e_hparam:
         print(f"记录超参数到 VisualDL HParams 失败: {e_hparam}。请检查 VisualDL 版本。将保存为JSON。")
@@ -399,7 +400,7 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
              lr_scheduler.step(test_avg_loss)
 
         is_best = test_accuracy > best_acc
-        
+
         current_metadata = {
             'epoch': epoch + 1,
             'best_acc': max(test_accuracy, best_acc),
@@ -428,12 +429,8 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     print(f"性能最佳的模型位于: {checkpoint_manager.best_model_path}")
 
     print("\n开始导出训练好的模型 (骨干网络) 到 Paddle Inference 格式...")
-    export_dir_base_name = "inference_graph"
-    export_dir = os.path.join(current_logdir, export_dir_base_name)
-    os.makedirs(export_dir, exist_ok=True)
-
-    export_model_name_prefix = "model_for_graph"
-    export_path_prefix = os.path.join(export_dir, export_model_name_prefix)
+    export_model_name_prefix = "model_for_graph" 
+    export_path_prefix = os.path.join(current_logdir, export_model_name_prefix)
 
     try:
         model_to_export, _ = get_backbone(
@@ -444,6 +441,7 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
 
         if not os.path.exists(checkpoint_manager.best_model_path):
              print(f"警告: 最佳模型文件 {checkpoint_manager.best_model_path} 未找到，无法导出用于Graph的骨干网络。")
+             model_to_export = None
         else:
             print(f"从最佳模型加载骨干网络权重: {checkpoint_manager.best_model_path}")
             full_model_state_dict = paddle.load(checkpoint_manager.best_model_path)
@@ -460,19 +458,17 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
             else:
                 model_to_export.set_state_dict(backbone_state_dict)
 
-            if model_to_export:
-                model_to_export.eval()
-                dummy_input = paddle.randn([1, 3, final_config.image_size, final_config.image_size], dtype='float32')
-                paddle.jit.save(
-                    layer=model_to_export,
-                    path=export_path_prefix,
-                    input_spec=[paddle.static.InputSpec(shape=[None, 3, final_config.image_size, final_config.image_size], dtype='float32')]
-                )
-                print(f"用于Graph可视化的骨干网络模型已成功导出到: {export_path_prefix}.pdmodel 和 {export_path_prefix}.pdiparams")
-                if log_writer:
-                    log_writer.add_text(tag='GraphInfo/ExportedModelPath', text_string=f"{export_path_prefix}.pdmodel", step=0)
-            else:
-                print("由于权重加载问题，跳过Graph模型导出。")
+        if model_to_export:
+            model_to_export.eval()
+            dummy_input = paddle.randn([1, 3, final_config.image_size, final_config.image_size], dtype='float32')
+            paddle.jit.save(
+                layer=model_to_export,
+                path=export_path_prefix,
+                input_spec=[paddle.static.InputSpec(shape=[None, 3, final_config.image_size, final_config.image_size], dtype='float32')]
+            )
+            print(f"用于Graph可视化的骨干网络模型已成功导出到: {export_path_prefix}.pdmodel 和 {export_path_prefix}.pdiparams (位于 {current_logdir})")
+        else:
+            print("由于权重加载问题或 model_to_export 为 None，跳过Graph模型导出。")
 
     except Exception as e:
         print(f"导出用于Graph可视化的模型失败: {e}")

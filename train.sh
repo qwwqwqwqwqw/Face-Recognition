@@ -5,7 +5,7 @@ set -e # 任何命令失败立即退出
 PROJECT_DIR="$(pwd)" # 使用当前目录作为项目目录，或者您可以硬编码一个绝对路径
 VENV_PATH="paddle/bin/activate" # 虚拟环境激活脚本的相对路径 (相对于PROJECT_DIR)
 CONFIG_FILE="configs/default_config.yaml"
-LOG_DIR="${PROJECT_DIR}/logs_local_train" # 日志文件保存目录
+LOG_DIR="${PROJECT_DIR}/logs_Terminal" # 日志文件保存目录
 
 # 需要在本地 GPU 训练的配置块名称列表
 CONFIG_NAMES_TO_TRAIN=(
