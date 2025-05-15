@@ -2,7 +2,7 @@
 
 > **重要提示**:
 > * 训练和测试时的图像大小**必须保持一致**！模型加载时会优先使用模型文件中保存的图像大小。
-> * **执行任何脚本前，请务必激活您的Python虚拟环境 (例如 `source paddle_env/bin/activate`)！**
+> * **执行任何脚本前，请务必激活您的Python虚拟环境 (例如 `source paddle/bin/activate`)！**
 
 本项目利用 [PaddlePaddle](https://www.paddlepaddle.org.cn/) 深度学习框架，构建了一套灵活且高效的人脸对比和人脸识别系统。系统支持多种骨干网络和损失函数的组合，并通过集中的 YAML 配置文件和命令行参数实现了高度的可配置性。
 
@@ -34,29 +34,28 @@
     ```
 2.  **创建并激活Python虚拟环境** (推荐):
     ```bash
-    python3 -m venv paddle_env
+    python3 -m venv paddle
     # Linux/macOS:
-    source paddle_env/bin/activate
+    source paddle/bin/activate
     # Windows:
-    # paddle_env\Scripts\activate
+    # paddle\Scripts\activate
     ```
     **重要**: 后续所有 `python` 或 `pip` 命令都应在此激活的虚拟环境中执行。
 
 3.  **安装依赖**:
     (推荐使用GPU版本以获得更好性能)
     ```bash
-    # 确保 paddle_env 虚拟环境已激活
-    # GPU 版本 (示例为CUDA 11.8, 请根据您的CUDA版本和PaddlePaddle官网查找对应安装命令)
-    python -m pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
-    pip uninstall numpy -y
-    pip install numpy==1.26.4 PyYAML opencv-python==4.5.5.64 matplotlib==3.5.3 scikit-learn tqdm
+    # 确保 paddle 虚拟环境已激活
+    # GPU 版本 (示例为CUDA 12.6, 请根据您的CUDA版本和PaddlePaddle官网查找对应安装命令)
+    python -m pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+    pip install -i https://pypi.tuna.tsinghua.edu.cn/simple/  numpy==1.26.4 PyYAML opencv-python==4.5.5.64 matplotlib==3.5.3 scikit-learn tqdm
     ```
     (如果无GPU或仅测试，可安装CPU版本)
     ```bash
     # CPU 版本
     # python -m pip install paddlepaddle==2.4.2 # CPU 版本可能也需要调整 numpy
     # pip uninstall numpy -y
-    # pip install numpy==1.26.4 PyYAML opencv-python==4.5.5.64 matplotlib==3.5.3 scikit-learn tqdm
+    # pip install -i https://pypi.tuna.tsinghua.edu.cn/simple/ numpy==1.26.4 PyYAML opencv-python==4.5.5.64 matplotlib==3.5.3 scikit-learn tqdm visualdl
     ```
     详细的环境准备和依赖安装说明请参见 [⚠️ 重要环境准备](#️-重要环境准备) 部分。
 
@@ -296,14 +295,14 @@ Face-Recognition/
 ```
 
 ### 2. 激活Python虚拟环境
-本项目推荐使用名为 `paddle_env` 的虚拟环境。
+本项目推荐使用名为 `paddle` 的虚拟环境。
 ```bash
 # 如果是第一次，创建虚拟环境:
-    # python3 -m venv paddle_env
+    # python3 -m venv paddle
     # Linux/macOS:
-    source paddle_env/bin/activate
+    source paddle/bin/activate
     # Windows:
-    # paddle_env\Scripts\activate
+    # paddle\Scripts\activate
 ```
 **非常重要**: 每次执行项目中的 Python 脚本 (`train.py`, `infer.py` 等) 或 `pip install` 命令前，都请确保您已在当前终端会话中激活了此虚拟环境。
 
@@ -318,7 +317,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_HOME/lib64:/usr/lib/wsl/lib
 运行 `source ~/.bashrc` (或对应的shell配置文件) 使更改生效。
 
 ### 4. 安装依赖
-请参考 [🚀 快速上手 (Quick Start)](#-快速上手-quick-start)部分的依赖安装命令。确保在已激活的 `paddle_env` 虚拟环境中执行。
+请参考 [🚀 快速上手 (Quick Start)](#-快速上手-quick-start)部分的依赖安装命令。确保在已激活的 `paddle` 虚拟环境中执行。
 
 ## ⚙️ 配置管理
 [(返回目录)](#-目录)
@@ -424,7 +423,7 @@ batch_size: 32
 `load_config` 函数负责加载和合并所有配置源，返回一个可通过属性访问的 `ConfigObject` 对象。
 
 ## 📖 详细使用指南
-**提醒：执行所有Python脚本前，请确保已激活 `paddle_env` 虚拟环境。**
+**提醒：执行所有Python脚本前，请确保已激活 `paddle` 虚拟环境。**
 [(返回目录)](#-目录)
 
 ### **1. 准备数据**
@@ -452,7 +451,7 @@ python CreateDataList.py <config.data_dir>/<config.class_name>
 ### **3. 模型训练 (`train.py`)**
 负责执行模型的训练流程。
 ```bash
-# 激活 paddle_env 环境后执行
+# 激活 paddle 环境后执行
 
 # 示例1: 使用YAML中默认的 active_config 进行训练
 python train.py --config_path configs/default_config.yaml --use_gpu --source manual --class_name face
@@ -469,7 +468,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 ### **4. 创建人脸特征库 (针对ArcFace模型, `create_face_library.py`)**
 如果模型使用 ArcFace Loss 训练，则需要创建特征库用于后续1:N识别。
 ```bash
-# 激活 paddle_env 环境后执行
+# 激活 paddle 环境后执行
 # --model_path 应指向训练好的ArcFace模型
 # --data_list_file 通常是训练列表，用于提取已知身份的特征
 # output_library_path 在配置文件中指定，例如 infer.face_library_path 或 create_library.output_library_path
@@ -485,7 +484,7 @@ python create_face_library.py \
 ### **5. 人脸识别测试 (`infer.py`)**
 对单张人脸图像进行身份识别。
 ```bash
-# 激活 paddle_env 环境后执行
+# 激活 paddle 环境后执行
 python infer.py \
     --config_path configs/default_config.yaml \
     --active_config resnet_arcface_cosine_config \
@@ -500,7 +499,7 @@ python infer.py \
 ### **6. 人脸对比测试 (`compare.py`)**
 对比两张人脸图像的相似度。
 ```bash
-# 激活 paddle_env 环境后执行
+# 激活 paddle 环境后执行
 python compare.py \
     --config_path configs/default_config.yaml \
     --active_config resnet_arcface_cosine_config \
@@ -523,7 +522,7 @@ python compare.py \
         *   更新 `infer`, `compare`, `create_library` 配置块中相关的 `label_file` (应为 `readme.json`) 和特征库路径，使其指向新数据集的相关文件和期望路径 (例如，`face_library_path: 'model/face_library_my_new_dataset.pkl'`)。
 4.  **开始新数据集训练**:
     ```bash
-    # 激活 paddle_env 环境后执行
+    # 激活 paddle 环境后执行
     python train.py --config_path configs/my_new_dataset_config.yaml --active_config <your_new_config_block> --use_gpu --source manual --class_name my_new_dataset
     ```
 
@@ -563,7 +562,7 @@ python compare.py \
 ### 参数调整示例
 修改 `learning_rate` 并指定一个特定的配置块进行训练：
 ```bash
-# 激活 paddle_env 环境后执行
+# 激活 paddle 环境后执行
 python train.py --config_path configs/default_config.yaml --active_config resnet_arcface_cosine_config --learning_rate 0.0005 --use_gpu --class_name face
 ```
 
@@ -595,7 +594,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
     5.  输出最终性能报告。
 *   **执行示例**:
 ```bash
-    # 激活 paddle_env 环境后执行
+    # 激活 paddle 环境后执行
     python evaluate_on_acceptance_set.py --config_path <指向包含模型信息的配置文件> --model_path <最终模型路径> --acceptance_data_list data/acceptance_test_set/acceptance_test.list --acceptance_label_file data/acceptance_test_set/readme.json [--use_gpu]
 ```
 
@@ -720,7 +719,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 ## 📝 注意事项
 [(返回目录)](#-目录)
 
-1.  **时刻激活虚拟环境!** 在执行任何 `python` 或 `pip` 命令前，确保已 `source paddle_env/bin/activate`。
+1.  **时刻激活虚拟环境!** 在执行任何 `python` 或 `pip` 命令前，确保已 `source paddle/bin/activate`。
 2.  确保配置文件 (`configs/default_config.yaml`) 中的 `num_classes` 与您数据集（由 `CreateDataList.py` 生成的 `readme.json` 中的 `total_classes` 定义）的实际类别总数匹配。
 3.  训练、所有后续操作（推理、对比、建库）中使用的 `image_size` 必须保持一致。脚本会优先使用模型文件中保存的 `image_size`。
 4.  ArcFace模型进行推理前，必须先使用 `create_face_library.py` 针对该模型和目标身份数据生成特征库。

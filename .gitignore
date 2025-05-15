@@ -8,7 +8,7 @@ pip-wheel-metadata/
 *.so
 
 # Virtual Environment
-paddle_env/
+paddle/
 venv/
 *.venv
 .env

@@ -60,17 +60,14 @@ class ImageAugmentation:
         # This ensures T is available when transforms are created and used in the worker.
         if self.is_train and self.train_transforms is None:
             try:
-                # Ensure T is available in this scope when creating transforms
-                # import paddle.vision.transforms as T_worker # Using local alias T_worker as a safeguard
-                # Using global T should also work if the top-level import is fine
                 self.color_jitter = T.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.2)
                 self.random_flip = T.RandomHorizontalFlip(prob=0.5)
                 self.train_transforms = T.Compose([
-                    T.ToNumpy(), # Ensure input is numpy array
+                    # Apply ColorJitter and RandomFlip BEFORE converting to float
                     self.color_jitter,
                     self.random_flip,
                     T.Resize(self.image_size),
-                    # Normalize is applied manually after transforms and before transpose CHW
+                    # Normalization and transpose will be applied manually AFTER transforms
                 ])
             except ImportError:
                  print("Error: paddle.vision.transforms not available when initializing train transforms!")
@@ -78,11 +75,9 @@ class ImageAugmentation:
 
         elif not self.is_train and self.eval_transforms is None:
             try:
-                # import paddle.vision.transforms as T_worker # Using local alias T_worker
                 self.eval_transforms = T.Compose([
-                    T.ToNumpy(), # Ensure input is numpy array
                     T.Resize(self.image_size),
-                    # Normalize is applied manually after transforms and before transpose CHW
+                    # Normalization and transpose will be applied manually AFTER transforms
                 ])
             except ImportError:
                  print("Error: paddle.vision.transforms not available when initializing eval transforms!")
@@ -97,8 +92,6 @@ class ImageAugmentation:
                 raise FileNotFoundError(f"图像文件未找到: {full_img_path}")
 
             # Use OpenCV to read image in color mode (tries to convert grayscale to 3 channels)
-            # IMREAD_COLOR=1, IMREAD_GRAYSCALE=0, IMREAD_UNCHANGED=-1
-            # cv2.imread returns BGR order by default
             img = cv2.imread(full_img_path, cv2.IMREAD_COLOR)
 
             # Check if image read was successful
@@ -106,52 +99,37 @@ class ImageAugmentation:
                 raise IOError(f"无法读取图像文件: {full_img_path}")
 
             # Convert image from BGR (OpenCV default) to RGB
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # img is now HWC, RGB, uint8 (0-255)
 
             # --- Handle grayscale images (already in RGB now) ---
-            # Check shape after BGR to RGB conversion. Grayscale read by cv2.IMREAD_COLOR
-            # and converted to RGB might result in shape (H, W, 3) but with R=G=B.
-            # However, if the original read was problematic for grayscale, img.shape might still be 2D.
             if len(img.shape) == 2:
-                # If grayscale (H, W), convert to (H, W, 3) by stacking
                 img = np.stack([img] * 3, axis=-1)
             elif len(img.shape) == 3 and img.shape[2] == 1:
-                 # If grayscale but read as HWC with 1 channel, convert to (H, W, 3) by stacking
-                 # This case might be less likely after cvtColor(..., COLOR_BGR2RGB) but good to be safe
                  img = np.stack([np.squeeze(img, axis=-1)] * 3, axis=-1)
             # --- Added block end ---
 
-
-            # Convert image to float and normalize to [0, 1]
-            img_float = img.astype(np.float32) / 255.0 # Now img_float is HWC, RGB, float [0,1]
-
-            # Apply transforms (these should be initialized above on the first call in the worker)
+            # Apply transforms (ColorJitter, RandomFlip, Resize) on uint8 image
             if self.is_train:
-                # Use the composed training transforms
-                transformed_img = self.train_transforms(img_float)
-
+                transformed_img = self.train_transforms(img) # Apply transforms on uint8 img
             else:
-                # Use the composed evaluation transforms
-                transformed_img = self.eval_transforms(img_float)
+                transformed_img = self.eval_transforms(img)   # Apply transforms on uint8 img
+
+            # Convert image to float and normalize to [0, 1] after transforms that expect uint8
+            # Ensure transformed_img is numpy array and convert to float [0, 1]
+            transformed_img_float = transformed_img.astype(np.float32) / 255.0 # Now HWC, RGB, float [0,1]
+
 
             # Normalize and Transpose CHW
-            # Normalize after other transforms that operate on [0, 1] range
+            # Normalize after converting to float and other transforms
             mean = np.array(self.mean_value).reshape((1, 1, 3)) # Reshape for HWC
             std = np.array(self.std_value).reshape((1, 1, 3))   # Reshape for HWC
-            img_normalized = (transformed_img - mean) / std # Apply normalization
+            img_normalized = (transformed_img_float - mean) / std # Apply normalization
 
             # HWC to CHW
-            # Assuming the composed transforms (Resize, Flip, Jitter) output HWC numpy array
-            # And Normalize (implemented manually here) also keeps HWC.
-            # Transpose to CHW as the final step.
             img_chw = img_normalized.transpose((2, 0, 1))
 
             # Convert to Paddle Tensor if needed by the rest of the pipeline.
-            # Assuming the DataLoader is set up to handle numpy arrays.
-            # If the model expects Tensors, the DataLoader should handle the batching and conversion.
-            # However, returning a Tensor here is also an option.
-            # return paddle.to_tensor(img_chw)
-
+            # The DataLoader should handle batching and conversion to Tensor.
             return img_chw
 
         except Exception as e:

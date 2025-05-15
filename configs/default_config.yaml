@@ -34,7 +34,10 @@ global_settings:
   data_dir: data                 # 数据集根目录
   class_name: face               # 数据集类别名称
   model_save_dir: model          # 模型保存目录
-  epochs: 1                    # 默认训练总轮数 (这里设置全局轮数)
+  epochs: 10                    # 默认训练总轮数 (这里设置全局轮数)
+  log_train_image_interval: 5     # 每 5 个 epoch 记录一次训练图片
+  log_eval_image_interval: 5      # 每 5 个 epoch 记录一次评估图片
+  log_histogram_interval: 2     # 每 2 个 epoch 记录一次直方图
   log_interval: 10               # 训练日志打印间隔 (steps)
   image_size: 112                # 输入模型图像尺寸 (高和宽相同)
   num_classes: 100               # 数据集中类别的数量 (根据实际数据集调整)
