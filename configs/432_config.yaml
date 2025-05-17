@@ -21,7 +21,7 @@
 # 脚本会根据这里的设置，从下方对应的配置块中加载训练、模型、损失函数等参数。
 # 请确保下方存在与此名称对应的配置块。
 # 这里默认选择推荐的组合及一套 LR/WD 默认值。
-active_config: resnet_ce_adamw_cosineannealingdecay_lr2_wd1_config
+active_config: resnet_ce_adamw_cosineannealingdecay_lr2_wd2_config
 
 # --- 全局默认设置 (设定一套合理的推荐参数作为所有实验的基础) ---
 # 大多数配置块将直接使用这里的参数，除非显式覆盖。
