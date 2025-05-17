@@ -178,7 +178,7 @@ def create_face_library(config: ConfigObject, cmd_args: argparse.Namespace):
 
     # --- 数据准备 ---
     # 默认使用训练列表建库，除非配置中指定了其他列表
-    data_list_for_library_name = "train.list" # 默认值
+    data_list_for_library_name = "trainer.list" # 默认值，与CreateDataList.py的输出匹配
     if hasattr(config, 'create_library') and config.create_library and config.create_library.get('data_list_for_library'):
         data_list_for_library_name = config.create_library.get('data_list_for_library')
 
@@ -200,8 +200,8 @@ def create_face_library(config: ConfigObject, cmd_args: argparse.Namespace):
     print("开始从数据列表提取特征...")
     try:
         with open(actual_library_data_list_path, 'r', encoding='utf-8') as f_list:
-            # 使用 strip() 去除每行末尾的换行符，然后分割
-            image_paths_and_labels = [line.strip().split('\\t') for line in f_list if line.strip()]
+            # 使用 strip() 去除每行末尾的换行符，然后使用制表符分割
+            image_paths_and_labels = [line.strip().split('\t') for line in f_list if line.strip()]
 
     except Exception as e:
         raise IOError(f"读取或解析库数据列表 {actual_library_data_list_path} 失败: {e}")
@@ -211,12 +211,17 @@ def create_face_library(config: ConfigObject, cmd_args: argparse.Namespace):
         for item in tqdm(image_paths_and_labels, desc="处理图像建库"):
             if len(item) != 2:
                 print(f"警告: 跳过格式不正确的行: {item} (在列表 {actual_library_data_list_path} 中)")
-            continue
+                continue
+            
             img_relative_path, label_id_str = item
             
             # CreateDataList.py 生成的列表路径已经是相对于 data_dir 的 'class_name/image.jpg' 形式
             # 所以我们直接用 data_dir 和这个相对路径拼接
-            full_img_path = os.path.join(data_root_for_lists, img_relative_path)
+            # 修正：img_relative_path 是相对于 data_dir/class_name 的，所以拼接时需要包含 class_name
+            # data_root_for_lists 指向 config.data_dir (例如 "data")
+            # class_name_for_lists 指向 config.class_name (例如 "face")
+            # img_relative_path 来自列表文件 (例如 "dilireba/some_image.jpg")
+            full_img_path = os.path.join(data_root_for_lists, class_name_for_lists, img_relative_path)
 
             if not os.path.exists(full_img_path):
                 print(f"警告: 图像文件 {full_img_path} (来自列表项: {img_relative_path}) 未找到，已跳过。")

@@ -46,7 +46,7 @@ global_settings:
   #训练稳定性: 增大 batch_size 可以使每个批次计算的梯度更接近整个数据集的真实梯度，从而使训练更稳定，收敛更快。但批次过大也可能导致模型收敛到次优解。
   #计算效率: 在显存允许范围内，适当增大 batch_size 可以更有效地利用 GPU 的并行计算能力，加速训练。
   #通常建议: 在显存允许的情况下，尽量使用较大的 batch_size。如果遇到 OOM，就减半，直到能正常运行。
-  learning_rate: 0.1             # 默认初始学习率
+  learning_rate: 0.001             # 默认初始学习率
   optimizer_type: AdamW       # 默认优化器类型 (Momentum 或 AdamW)：不同的优化器有不同的参数更新策略。
   #Momentum: 模拟物理惯性，有助于冲过局部最优解。需要配合 momentum 参数。
   #AdamW: 自适应学习率，收敛速度快。需要配合 beta1, beta2, epsilon 参数。

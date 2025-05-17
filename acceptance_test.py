@@ -23,18 +23,24 @@ import paddle
 import numpy as np # type: ignore
 import json # 用于加载模型元数据或保存结果
 import time
+import pickle # 导入 pickle 用于加载特征库
+import inspect # 导入 inspect 用于检查 forward 函数参数
+import sys # 导入 sys 用于脚本退出状态
 
 import MyReader # 数据读取模块
 from config_utils import load_config, ConfigObject # 配置加载工具
-from model_factory import get_backbone, get_head   # 模型构建工厂
+from model_factory import get_backbone, get_head # 同时导入 backbone 和 head
+# from model_factory import get_head # 不再需要头部模块
+# from .compare import calculate_cosine_similarity # 假设 compare.py 中有相似度计算函数，或自己实现
+import paddle.nn.functional as F # 用于可能的相似度计算（如Cosine Similarity）和分类损失计算
 
 def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace):
     """
-    执行在验收集上的模型评估。
+    执行基于特征比对 (ArcFace) 或分类 (CrossEntropy) 的模型的验收测试。
 
     Args:
         config (ConfigObject): 合并后的配置对象。
-        cmd_args (argparse.Namespace): 命令行参数。
+        cmd_args (argparse.Namespace): 命令行参数，应包含 trained_model_path，ArcFace 需要 feature_library_path。
     """
     # 1. 设置运行设备
     if config.use_gpu and paddle.is_compiled_with_cuda():
@@ -44,41 +50,47 @@ def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace
         paddle.set_device('cpu')
         print("使用 CPU 进行验收测试。")
 
-    # 2. 创建验收数据加载器
-    print("正在创建验收数据加载器...")
+    # 2. 创建测试数据加载器 (使用原 eval 列表，现在是合并的测试集)
+    print("正在创建测试数据加载器 (用于验收测试)...")
     try:
-        acceptance_loader = MyReader.create_data_loader(
+        # 使用 mode='eval' 来加载配置中 dataset_params.eval_list 指定的文件
+        # CreateDataList.py 修改后，eval_list (test.list) 现在是 30% 的测试集
+        test_loader = MyReader.create_data_loader(
             config=config,
-            mode='acceptance' # 关键：指定模式为 'acceptance'
+            mode='eval' # 加载测试集 (原 eval + acceptance)
         )
-        print(f"验收数据加载器创建成功，共 {len(acceptance_loader.dataset)} 个样本。")
+        print(f"测试数据加载器创建成功，共 {len(test_loader.dataset)} 个样本。")
     except Exception as e:
-        print(f"创建验收数据加载器失败: {e}")
+        print(f"创建测试数据加载器失败: {e}")
         return
 
-    if len(acceptance_loader.dataset) == 0:
-        print("警告: 验收数据集为空，无法进行评估。请检查验收列表文件和路径配置。")
+    if len(test_loader.dataset) == 0:
+        print("警告: 测试数据集为空，无法进行验收。请检查测试列表文件和路径配置。")
         return
 
-    # 3. 加载模型权重并实例化模型
-    #    trained_model_path 应指向包含骨干网络和头部权重的 .pdparams 文件。
-    #    该文件也可能包含训练时的配置快照。
-    model_weights_path = cmd_args.trained_model_path or config.get('trained_model_path')
+    # 3. 加载模型权重并获取模型配置
+    #    trained_model_path 应指向包含骨干网络权重的 .pdparams 文件。
+    model_weights_path = cmd_args.trained_model_path # model_weights_path 必须通过命令行指定
     if not model_weights_path:
-        print("错误: 未通过命令行参数 --trained_model_path 或配置文件指定模型权重路径。")
+        print("错误: 未通过命令行参数 --trained_model_path 指定模型权重路径。")
         return
     if not os.path.exists(model_weights_path):
         print(f"错误: 指定的模型权重文件不存在: {model_weights_path}")
         return
 
-    print(f"将从以下路径加载模型权重: {model_weights_path}")
+    print(f"将从以下路径加载模型权重 (仅骨干网络): {model_weights_path}")
     try:
         checkpoint_data = paddle.load(model_weights_path)
+        if not isinstance(checkpoint_data, dict): # 确保加载的是 state_dict 字典
+             # 如果不是字典，可能是旧格式或其他问题，尝试加载为整个模型（但不推荐）
+             # 或者直接退出，因为我们预期加载的是 CombinedModel 的 state_dict
+             print(f"错误: 加载的模型权重文件 {model_weights_path} 不是预期的 state_dict 格式。")
+             return
     except Exception as e:
         print(f"加载模型权重文件 {model_weights_path} 失败: {e}")
         return
 
-    # --- 重点修改：从元数据文件或当前配置中获取模型参数 ---
+    # --- 获取模型构建参数 (同训练脚本逻辑，优先从元数据加载) ---
     model_type_to_use = None
     loss_type_to_use = None
     num_classes_to_use = None
@@ -143,166 +155,356 @@ def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace
         print("错误: 无法最终确定模型构建所需的核心配置 (model_type, loss_type, num_classes, image_size)。请检查元数据或脚本配置。")
         return
 
-    # 实例化骨干网络
-    try:
-        backbone_instance, feature_dim_from_backbone = get_backbone(
-            config_model_params=backbone_specific_params_to_use,
-            model_type_str=model_type_to_use,
-            image_size=image_size_to_use
-        )
-        # 修改权重加载逻辑
-        # if 'backbone' in checkpoint_data: # 旧的逻辑
-        #     backbone_instance.set_state_dict(checkpoint_data['backbone'])
-        #     print(f"骨干网络 ({model_type_to_use}) 实例化并加载权重成功。输出特征维度: {feature_dim_from_backbone}")
-        # else:
-        #     print(f"警告: 模型检查点中未找到 'backbone' 权重。骨干网络 ({model_type_to_use}) 将使用随机初始化权重，这可能不是期望的行为。")
-        
-        # 新的加载逻辑，兼容 CombinedModel 的 state_dict
-        if isinstance(checkpoint_data, dict): # 确保 checkpoint_data 是 state_dict
-            backbone_state_dict = {k.replace('backbone.', '', 1): v for k, v in checkpoint_data.items() if k.startswith('backbone.')}
-            if backbone_state_dict:
-                backbone_instance.set_state_dict(backbone_state_dict)
-                print(f"骨干网络 ({model_type_to_use}) 实例化并从检查点加载 'backbone.' 权重成功。输出特征维度: {feature_dim_from_backbone}")
+    # --- 根据模型类型执行不同的验收逻辑 ---
+    if loss_type_to_use.lower() == 'arcface':
+        print("\n检测到 ArcFace 模型，执行基于特征比对的识别验收...")
+
+        # 实例化骨干网络
+        try:
+            backbone_instance, feature_dim_from_backbone = get_backbone(
+                config_model_params=backbone_specific_params_to_use,
+                model_type_str=model_type_to_use,
+                image_size=image_size_to_use
+            )
+            if isinstance(checkpoint_data, dict): # 确保 checkpoint_data 是 state_dict
+                backbone_state_dict = {k.replace('backbone.', '', 1): v for k, v in checkpoint_data.items() if k.startswith('backbone.')}
+                if backbone_state_dict:
+                    backbone_instance.set_state_dict(backbone_state_dict)
+                    print(f"骨干网络 ({model_type_to_use}) 实例化并从检查点加载 'backbone.' 权重成功。输出特征维度: {feature_dim_from_backbone}")
+                else:
+                    # 尝试将整个 state_dict 加载到 backbone (如果模型只包含 backbone)
+                    try:
+                        backbone_instance.set_state_dict(checkpoint_data)
+                        print(f"骨干网络 ({model_type_to_use}) 实例化并尝试直接加载整个检查点权重成功。")
+                    except Exception as e_direct_bb_load:
+                        print(f"警告: 在检查点中未找到 'backbone.' 前缀的权重，且直接加载整个状态字典到骨干网络失败: {e_direct_bb_load}。骨干网络将使用随机初始化权重。")
             else:
-                # 尝试将整个 state_dict 加载到 backbone (如果模型只包含 backbone)
-                try:
-                    backbone_instance.set_state_dict(checkpoint_data)
-                    print(f"骨干网络 ({model_type_to_use}) 实例化并尝试直接加载整个检查点权重成功。")
-                except Exception as e_direct_bb_load:
-                    print(f"警告: 在检查点中未找到 'backbone.' 前缀的权重，且直接加载整个状态字典到骨干网络失败: {e_direct_bb_load}。骨干网络将使用随机初始化权重。")
-        else:
-            print(f"警告: 加载的检查点数据不是预期的字典格式。骨干网络 ({model_type_to_use}) 将使用随机初始化权重。")
+                print(f"警告: 加载的检查点数据不是预期的字典格式。骨干网络 ({model_type_to_use}) 将使用随机初始化权重。")
 
-    except Exception as e:
-        print(f"创建或加载骨干网络 ({model_type_to_use}) 失败: {e}")
-        return
+        except Exception as e:
+            print(f"创建或加载骨干网络 ({model_type_to_use}) 失败: {e}")
+            return
 
-    # 实例化头部模块
-    try:
-        head_module_instance = get_head(
-            config_loss_params=head_specific_params_to_use,
-            loss_type_str=loss_type_to_use,
-            in_features=feature_dim_from_backbone,
-            num_classes=num_classes_to_use
-        )
-        # 修改权重加载逻辑
-        # if 'head' in checkpoint_data: # 旧的逻辑
-        #     head_module_instance.set_state_dict(checkpoint_data['head'])
-        #     print(f"头部模块 ({loss_type_to_use}) 实例化并加载权重成功。")
-        # else:
-        #     print(f"警告: 模型检查点中未找到 'head' 权重。头部模块 ({loss_type_to_use}) 将使用随机初始化权重。")
+        # 4. 加载特征库
+        feature_library_path = cmd_args.feature_library_path # 特征库路径 ArcFace 必需通过命令行指定
+        if not feature_library_path:
+            print("错误: ArcFace 模型验收需要指定特征库文件路径。未通过命令行参数 --feature_library_path 指定。")
+            return
+        if not os.path.exists(feature_library_path):
+            print(f"错误: 指定的特征库文件不存在: {feature_library_path}")
+            return
 
-        # 新的加载逻辑，兼容 CombinedModel 的 state_dict
-        if isinstance(checkpoint_data, dict): # 确保 checkpoint_data 是 state_dict
-            head_state_dict = {k.replace('head.', '', 1): v for k, v in checkpoint_data.items() if k.startswith('head.')}
-            if head_state_dict:
-                head_module_instance.set_state_dict(head_state_dict)
-                print(f"头部模块 ({loss_type_to_use}) 实例化并从检查点加载 'head.' 权重成功。")
-            else:
-                # 尝试将整个 state_dict 加载到 head (如果模型只包含 head，虽然不太可能)
-                # 或者如果 loss_type_to_use 是一个不需要特定头部训练的类型 (例如，如果骨干直接输出分类)
-                # 但通常对于分类任务，总会有一个head。
-                print(f"警告: 在检查点中未找到 'head.' 前缀的权重。头部模块 ({loss_type_to_use}) 将使用随机初始化权重。")
-        else:
-             print(f"警告: 加载的检查点数据不是预期的字典格式。头部模块 ({loss_type_to_use}) 将使用随机初始化权重。")
+        print(f"正在加载特征库文件: {feature_library_path}")
+        try:
+            with open(feature_library_path, 'rb') as f:
+                feature_library = pickle.load(f)
+            print(f"特征库加载成功，包含 {len(feature_library['features'])} 个特征向量和 {len(feature_library['labels'])} 个标签。")
+            # 假设特征库格式为 {'features': list of np.ndarray, 'labels': list of int, 'image_paths': list of str}
+            # 将特征转换为 Paddle Tensor 以便批量计算相似度
+            library_features = paddle.to_tensor(np.array(feature_library['features']), dtype='float32')
+            library_labels = feature_library['labels']
+            # library_image_paths = feature_library.get('image_paths', None) # 可选，用于调试
 
-    except Exception as e:
-        print(f"创建或加载头部模块 ({loss_type_to_use}) 失败: {e}")
-        return
+        except Exception as e:
+            print(f"加载或解析特征库文件 {feature_library_path} 失败: {e}")
+            return
 
-    # 4. 执行评估循环
-    backbone_instance.eval()
-    head_module_instance.eval()
+        # 5. 执行比对识别循环
+        backbone_instance.eval()
 
-    total_loss = 0.0
-    correct_samples = 0
-    total_samples = 0
-    
-    print(f"\\n开始在验收集上评估模型 (共 {len(acceptance_loader.dataset)} 个样本)...")
-    eval_start_time = time.time()
+        correct_identifications = 0
+        total_samples = 0
 
-    with paddle.no_grad():
-        for batch_id, data_batch in enumerate(acceptance_loader):
-            images, labels = data_batch
-            if labels.ndim > 1 and labels.shape[1] == 1:
-                labels = paddle.squeeze(labels, axis=1)
+        # 从 config 获取识别阈值，如果命令行指定了则覆盖
+        recognition_threshold = cmd_args.recognition_threshold if cmd_args.recognition_threshold is not None else config.infer.get('recognition_threshold', 0.5)
+        print(f"使用识别阈值: {recognition_threshold:.4f}")
 
-            features = backbone_instance(images)
-            loss_value, acc_output = head_module_instance(features, labels)
+        print(f"\n开始在测试集上进行比对识别验收 (共 {len(test_loader.dataset)} 个样本)...")
+        eval_start_time = time.time()
 
-            if loss_value is not None:
-                total_loss += loss_value.item() * images.shape[0]
-            
-            # acc_output 可能是 logits (ArcFaceHead返回的是logits) 或 经过softmax的概率
-            # 对于分类准确率，通常在logits上取argmax
-            if acc_output is not None:
-                predicted_labels = paddle.argmax(acc_output, axis=1)
-                correct_samples += (predicted_labels == labels).sum().item()
-            
-            total_samples += labels.shape[0]
+        # 实现 Cosine Similarity 计算函数 (如果 compare.py 不可用)
+        def calculate_cosine_similarity(vec1: paddle.Tensor, matrix: paddle.Tensor) -> paddle.Tensor:
+            # vec1: [N, feature_dim]
+            # matrix: [M, feature_dim]
+            # 输出: [N, M]
+            # 归一化
+            vec1 = F.normalize(vec1, axis=1)
+            matrix = F.normalize(matrix, axis=1)
+            # 计算相似度：[N, feature_dim] @ [feature_dim, M] = [N, M]
+            similarity_scores = paddle.matmul(vec1, matrix, transpose_y=True)
+            return similarity_scores
 
-            if (batch_id + 1) % config.get('log_interval', 20) == 0:
-                current_acc = correct_samples / total_samples if total_samples > 0 else 0
-                current_avg_loss = total_loss / total_samples if total_samples > 0 else 0
-                print(f"  批次 {batch_id + 1}/{len(acceptance_loader)}: "
-                      f"当前平均损失 {current_avg_loss:.4f}, 当前准确率 {current_acc:.4f}")
 
-    eval_duration = time.time() - eval_start_time
+        with paddle.no_grad():
+            # Batch processing for inference
+            for batch_id, data_batch in enumerate(test_loader):
+                images, labels = data_batch
+                if labels.ndim > 1 and labels.shape[1] == 1:
+                    labels = paddle.squeeze(labels, axis=1)
 
-    # 5. 计算并打印最终结果
-    final_avg_loss = total_loss / total_samples if total_samples > 0 else float('nan')
-    final_accuracy = correct_samples / total_samples if total_samples > 0 else float('nan')
+                # 提取查询图片的特征 (一个批次)
+                query_features_batch = backbone_instance(images) # [batch_size, feature_dim]
 
-    print("\\n--- 验收测试结果 ---")
-    print(f"  模型文件: {model_weights_path}")
-    print(f"  测试样本总数: {total_samples}")
-    print(f"  正确预测样本数: {correct_samples}")
-    print(f"  平均损失: {final_avg_loss:.4f}")
-    print(f"  准确率: {final_accuracy:.4f} ({final_accuracy*100:.2f}%)")
-    print(f"  评估耗时: {eval_duration:.2f} 秒")
-    print("----------------------\\n")
+                # 计算批次内所有查询图片与特征库的相似度
+                # similarity_scores_batch: [batch_size, num_library_features]
+                similarity_scores_batch = calculate_cosine_similarity(query_features_batch, library_features)
 
-    # (可选) 保存详细结果到文件
-    results_to_save = {
-        'model_path': model_weights_path,
-        'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
-        'total_samples': total_samples,
-        'correct_samples': correct_samples,
-        'average_loss': final_avg_loss,
-        'accuracy': final_accuracy,
-        'config_used_for_eval': config.to_dict(), # 保存评估时使用的完整配置
-        'model_config_snapshot': {
-            'model_type': model_type_to_use,
-            'loss_type': loss_type_to_use,
-            'num_classes': num_classes_to_use,
-            'image_size': image_size_to_use,
-            'model_specific_params': backbone_specific_params_to_use,
-            'loss_specific_params': head_specific_params_to_use
+                # 处理批次内的每个样本
+                for i in range(query_features_batch.shape[0]):
+                    total_samples += 1
+                    true_label = labels[i].item()
+
+                    # 获取当前样本的相似度分数 [num_library_features]
+                    current_sample_scores = similarity_scores_batch[i, :]
+
+                    # 找到最高相似度及其索引
+                    max_similarity, max_similarity_idx = paddle.max(current_sample_scores, axis=0).numpy()
+
+                    # 获取最高相似度对应的库中样本的标签
+                    predicted_label = library_labels[max_similarity_idx]
+
+                    # 判断是否识别正确: 最高相似度大于阈值 AND 预测标签与真实标签一致
+                    if max_similarity > recognition_threshold and predicted_label == true_label:
+                        correct_identifications += 1
+
+                    # 可选：打印每张图片的识别结果 (详细模式)
+                    # if config.get('verbose_acceptance', False):
+                    #     print(f"  样本 {total_samples}: 真\t标签 {true_label}, 最\t高相似度 {max_similarity:.4f}, 预测标签 {predicted_label}. {'正确' if max_similarity > recognition_threshold and predicted_label == true_label else '错误'}")
+
+                if (batch_id + 1) % config.get('log_interval', 20) == 0:
+                    current_accuracy = correct_identifications / total_samples if total_samples > 0 else 0
+                    print(f"  批次 {batch_id + 1}/{len(test_loader)}: 已处理 {total_samples} 样本，当前识别准确率: {current_accuracy:.4f}")
+
+        eval_duration = time.time() - eval_start_time
+
+        # 6. 汇总并打印最终结果
+        final_accuracy = correct_identifications / total_samples if total_samples > 0 else 0
+        print("\n--- 验收测试结果 (ArcFace 识别) ---")
+        print(f"总测试样本数: {total_samples}")
+        print(f"正确识别样本数: {correct_identifications}")
+        print(f"识别准确率 (阈值 > {recognition_threshold:.4f}): {final_accuracy:.4f}")
+        print(f"验收测试总耗时: {eval_duration:.2f} 秒")
+        print("--------------------------------")
+
+        # --- 将结果保存到 JSON 文件 ---
+        results = {
+            "model_path": cmd_args.trained_model_path,
+            "loss_type": loss_type_to_use,
+            "total_samples": total_samples,
+            "accuracy": final_accuracy,
+            "duration_seconds": eval_duration,
         }
-    }
-    
-    # 确定结果文件名和路径
-    # results_dir = config.get("results_save_dir", "acceptance_results") # 从配置读取或使用默认 # 旧逻辑
-    results_dir_from_config = config.get("results_save_dir")
-    results_dir = results_dir_from_config if results_dir_from_config is not None else "acceptance_results"
 
-    if not os.path.exists(results_dir):
-        os.makedirs(results_dir)
-        print(f"创建验收结果保存目录: {results_dir}")
+        results["correct_identifications"] = correct_identifications
+        results["recognition_threshold"] = recognition_threshold
+        results["feature_library_path"] = feature_library_path
 
-    # 基于模型文件名生成结果文件名
-    model_basename = os.path.splitext(os.path.basename(model_weights_path))[0]
-    result_filename = f"acceptance_summary_{model_basename}_{time.strftime('%Y%m%d%H%M%S')}.json"
-    result_filepath = os.path.join(results_dir, result_filename)
+        output_json_path = cmd_args.output_json_path
+        if not output_json_path:
+            # 如果没有指定输出路径，默认保存到当前目录下的一个文件
+            output_json_path = os.path.join(".", "acceptance_results.json")
+            print(f"警告: 未指定验收结果输出路径 (--output_json_path)，将保存到默认路径: {output_json_path}")
 
-    try:
-        with open(result_filepath, 'w', encoding='utf-8') as f:
-            json.dump(results_to_save, f, indent=4, ensure_ascii=False, default=lambda o: '<not serializable>')
-        print(f"验收测试摘要已保存至: {result_filepath}")
-    except Exception as e:
-        print(f"警告: 保存验收测试摘要到 {result_filepath} 失败: {e}")
+        try:
+            os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+            with open(output_json_path, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=4, ensure_ascii=False)
+            print(f"验收结果已保存到: {output_json_path}")
+        except Exception as e:
+            print(f"错误: 保存验收结果到 {output_json_path} 失败: {e}")
+            # 即使保存失败，也尝试返回准确率，但标记出错
+            # sys.exit(1) # 退出，标记失败
 
+        return final_accuracy # 虽然保存到JSON，仍然返回准确率，方便脚本解析或打印
 
+    elif loss_type_to_use.lower() == 'cross_entropy':
+        print("\n检测到 Cross-Entropy 模型，执行基于分类的验收...")
+
+        # 实例化骨干网络和头部
+        try:
+            backbone_instance, feature_dim_from_backbone = get_backbone(
+                config_model_params=backbone_specific_params_to_use,
+                model_type_str=model_type_to_use,
+                image_size=image_size_to_use
+            )
+            head_module_instance = get_head(
+                config_loss_params=head_specific_params_to_use,
+                loss_type_str=loss_type_to_use,
+                in_features=feature_dim_from_backbone,
+                num_classes=num_classes_to_use
+            )
+
+            # 加载模型权重
+            if isinstance(checkpoint_data, dict): # 确保 checkpoint_data 是 state_dict
+                 try:
+                     # 尝试加载到 CombinedModel 结构
+                     class CombinedModel(paddle.nn.Layer):
+                         def __init__(self, backbone, head=None):
+                             super().__init__()
+                             self.backbone = backbone
+                             self.head = head
+                         def forward(self, x, label=None):
+                             features = self.backbone(x)
+                             if self.head:
+                                  head_forward_params = inspect.signature(self.head.forward).parameters
+                                  if 'label' in head_forward_params:
+                                       return self.head(features, label)
+                                  else:
+                                       return self.head(features)
+                             else:
+                                 # CrossEntropy 模型应该有 head，此处不会返回纯 features
+                                 raise ValueError("CrossEntropy 模型需要头部模块进行分类。")
+
+                     combined_model = CombinedModel(backbone_instance, head_module_instance)
+                     combined_model.set_state_dict(checkpoint_data)
+                     print("CombinedModel 实例化并加载权重成功。")
+                     # 使用 combined_model 进行评估
+                     model_to_evaluate = combined_model
+
+                 except Exception as e_combined_load:
+                      print(f"警告: 加载 CombinedModel 权重失败: {e_combined_load}. 将尝试单独加载 backbone 和 head 权重.")
+                      # 回退到单独加载 backbone 和 head
+                      try:
+                          backbone_state_dict = {k.replace('backbone.', '', 1): v for k, v in checkpoint_data.items() if k.startswith('backbone.')}
+                          if backbone_state_dict:
+                              backbone_instance.set_state_dict(backbone_state_dict)
+                              print(f"骨干网络 ({model_type_to_use}) 单独加载权重成功。")
+                          else:
+                              print(f"警告: 在检查点中未找到 'backbone.' 权重。骨干网络将使用随机初始化权重。")
+
+                          head_state_dict = {k.replace('head.', '', 1): v for k, v in checkpoint_data.items() if k.startswith('head.')}
+                          if head_state_dict:
+                              head_module_instance.set_state_dict(head_state_dict)
+                              print(f"头部模块 ({loss_type_to_use}) 单独加载权重成功。")
+                          else:
+                              print(f"警告: 在检查点中未找到 'head.' 权重。头部模块将使用随机初始化权重。")
+
+                          # 使用单独加载权重的 backbone 和 head 进行评估
+                          class SeparatedModel(paddle.nn.Layer):
+                              def __init__(self, backbone, head):
+                                  super().__init__()
+                                  self.backbone = backbone
+                                  self.head = head
+                              def forward(self, x, label=None):
+                                   features = self.backbone(x)
+                                   return self.head(features, label) # CrossEntropyHead forward 接受可选的 label 参数
+
+                          model_to_evaluate = SeparatedModel(backbone_instance, head_module_instance)
+                          print("使用单独加载权重的模型进行评估。")
+
+                      except Exception as e_separate_load:
+                          print(f"错误: 单独加载 backbone 和 head 权重失败: {e_separate_load}. 无法进行验收。")
+                          return
+
+            else:
+                 print(f"错误: 加载的模型权重文件 {model_weights_path} 不是预期的 state_dict 格式。无法加载模型。")
+                 return
+
+            print(f"模型 ({model_type_to_use} + {loss_type_to_use} 头部) 实例化并加载权重成功。")
+
+        except Exception as e:
+            print(f"创建或加载模型 ({model_type_to_use} + {loss_type_to_use} 头部) 失败: {e}")
+            return
+
+        # 5. 执行分类评估循环
+        model_to_evaluate.eval()
+
+        correct_predictions = 0
+        total_samples = 0
+        total_loss = 0.0 # 可以选择计算并报告损失
+
+        print(f"\n开始在测试集上进行分类验收 (共 {len(test_loader.dataset)} 个样本)...")
+        eval_start_time = time.time()
+
+        with paddle.no_grad():
+            for batch_id, data_batch in enumerate(test_loader):
+                images, labels = data_batch
+                if labels.ndim > 1 and labels.shape[1] == 1:
+                    labels = paddle.squeeze(labels, axis=1)
+
+                # 前向传播
+                # CombinedModel 或 SeparatedModel 的 forward 会调用 head.forward
+                outputs = model_to_evaluate(images, labels) # 传递 labels 以便 CrossEntropyHead 计算损失
+                loss = None
+                logits = None
+
+                if isinstance(outputs, tuple) and len(outputs) == 2: # 假设 head 返回 (loss, logits)
+                    loss, logits = outputs
+                elif isinstance(outputs, paddle.Tensor): # 假设 head 只返回 logits
+                    logits = outputs
+                    # 手动计算损失
+                    try:
+                        loss = F.cross_entropy(logits, labels)
+                    except Exception as e_loss_calc:
+                         print(f"警告: 无法计算分类损失: {e_loss_calc}")
+                         loss = None
+
+                if loss is not None:
+                    total_loss += loss.item() * images.shape[0]
+
+                if logits is not None:
+                    # 计算准确率
+                    predicted_labels = paddle.argmax(logits, axis=1)
+                    correct_predictions += paddle.sum(predicted_labels == labels).item()
+                
+                total_samples += labels.shape[0]
+
+                if (batch_id + 1) % config.get('log_interval', 20) == 0:
+                    current_accuracy = correct_predictions / total_samples if total_samples > 0 else 0
+                    current_avg_loss = total_loss / total_samples if total_samples > 0 else 0
+                    print(f"  批次 {batch_id + 1}/{len(test_loader)}: 已处理 {total_samples} 样本，当前准确率: {current_accuracy:.4f}", end='')
+                    if loss is not None: print(f", 当前平均损失: {current_avg_loss:.4f}", end='')
+                    print("")
+
+        eval_duration = time.time() - eval_start_time
+
+        # 6. 汇总并打印最终结果
+        final_accuracy = correct_predictions / total_samples if total_samples > 0 else 0
+        final_avg_loss = total_loss / total_samples if total_samples > 0 else float('nan')
+
+        print("\n--- 验收测试结果 (Cross-Entropy 分类) ---")
+        print(f"总测试样本数: {total_samples}")
+        print(f"正确预测样本数: {correct_predictions}")
+        print(f"分类准确率: {final_accuracy:.4f}")
+        if loss is not None: print(f"平均损失: {final_avg_loss:.4f}")
+        print(f"验收测试总耗时: {eval_duration:.2f} 秒")
+        print("---------------------------------------")
+
+        # --- 将结果保存到 JSON 文件 ---
+        results = {
+            "model_path": cmd_args.trained_model_path,
+            "loss_type": loss_type_to_use,
+            "total_samples": total_samples,
+            "accuracy": final_accuracy,
+            "duration_seconds": eval_duration,
+        }
+
+        results["correct_predictions"] = correct_predictions
+        results["average_loss"] = final_avg_loss # 添加平均损失
+
+        output_json_path = cmd_args.output_json_path
+        if not output_json_path:
+            # 如果没有指定输出路径，默认保存到当前目录下的一个文件
+            output_json_path = os.path.join(".", "acceptance_results.json")
+            print(f"警告: 未指定验收结果输出路径 (--output_json_path)，将保存到默认路径: {output_json_path}")
+
+        try:
+            os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+            with open(output_json_path, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=4, ensure_ascii=False)
+            print(f"验收结果已保存到: {output_json_path}")
+        except Exception as e:
+            print(f"错误: 保存验收结果到 {output_json_path} 失败: {e}")
+            # 即使保存失败，也尝试返回准确率，但标记出错
+            # sys.exit(1) # 退出，标记失败
+
+        return final_accuracy # 虽然保存到JSON，仍然返回准确率，方便脚本解析或打印
+
+    else:
+        print(f"错误: 不支持的损失类型 '{loss_type_to_use}' 用于验收测试。")
+        return None
+
+# --- 脚本主入口 ---
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='人脸识别模型验收测试脚本')
 
@@ -311,8 +513,10 @@ if __name__ == '__main__':
                         help='指定YAML配置文件的路径。')
     parser.add_argument('--active_config', type=str, default=None,
                         help='通过命令行指定要激活的配置块名称，覆盖YAML文件中的active_config设置。')
-    parser.add_argument('--trained_model_path', type=str, required=False,
+    parser.add_argument('--trained_model_path', type=str, required=True,
                         help='必需：指定已训练模型的权重文件路径 (.pdparams)。如果配置文件中也指定了，命令行优先。')
+    parser.add_argument('--output_json_path', type=str, default=None,
+                        help='指定验收结果 JSON 文件的输出路径。如果不指定，将保存到当前目录下的 acceptance_results.json。')
     
     # 可覆盖配置文件的参数
     parser.add_argument('--use_gpu', action=argparse.BooleanOptionalAction, default=None,
@@ -324,12 +528,16 @@ if __name__ == '__main__':
     parser.add_argument('--class_name', type=str, help='数据集子目录名 (覆盖配置文件)。')
     parser.add_argument('--log_interval', type=int, help='打印日志的间隔批次数 (覆盖配置文件)。')
     parser.add_argument('--results_save_dir', type=str, help='验收结果保存目录 (覆盖配置文件)。')
+    parser.add_argument('--feature_library_path', type=str, default=None,
+                        help='[ArcFace Only] 用于比对的特征库文件 (.pkl) 的路径。ArcFace 模型验收时必需指定。')
+    parser.add_argument('--recognition_threshold', type=float, default=None,
+                        help='[ArcFace Only] 人脸识别比对的相似度阈值 (覆盖配置文件)。')
 
     cmd_line_args = parser.parse_args()
 
     # 加载配置
     final_config = load_config(
-        default_yaml_path='configs/default_config.yaml',
+        default_yaml_path=cmd_line_args.config_path,
         cmd_args_namespace=cmd_line_args
     )
 
@@ -351,4 +559,18 @@ if __name__ == '__main__':
     if final_config.get('num_classes') is None: # 再次检查 num_classes
         parser.error("错误: 最终配置中未能确定 'num_classes'。请检查YAML文件和命令行参数 --num_classes。")
 
-    run_acceptance_evaluation(final_config, cmd_line_args) 
+    # 运行验收评估
+    accuracy = run_acceptance_evaluation(final_config, cmd_line_args)
+    
+    # 脚本的退出状态可以反映成功与否，以及（可选）准确率是否达到阈值
+    if accuracy is not None:
+        # 可以根据准确率是否大于某个阈值来设置退出状态
+        # 例如：如果准确率低于 0.9，脚本退出码为 1
+        # if accuracy < 0.9:
+        #     print("验收准确率未达到期望阈值 (0.9)。")
+        #     sys.exit(1)
+        # else:
+        #     print("验收通过。")
+        sys.exit(0) # 成功执行并获得结果
+    else:
+        sys.exit(1) # 验收执行失败 

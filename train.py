@@ -259,7 +259,21 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     lr_scheduler_name = final_config.lr_scheduler_type
     active_config_name = getattr(final_config, '_active_config_name', None) # Get active config name for logging
 
-    combo_dir_name = f"{backbone_type}__{loss_fn_type}__{lr_scheduler_name}"
+    # 获取配置的主要组件，包括学习率和权重衰减
+    lr_value = final_config.learning_rate
+    wd_value = final_config.optimizer_params.get('weight_decay', 0.0) if hasattr(final_config, 'optimizer_params') else 0.0
+    
+    # 格式化学习率和权重衰减为简洁形式
+    lr_formatted = f"lr{str(lr_value).replace('0.', '')}"
+    wd_formatted = f"wd{str(wd_value).replace('0.', '')}"
+    
+    # 创建更详细的组合目录名称，包含所有关键参数
+    combo_dir_name = f"{backbone_type}__{loss_fn_type}__{final_config.optimizer_type}__{lr_scheduler_name}__{lr_formatted}__{wd_formatted}"
+    
+    # 如果active_config_name存在，可以直接使用它，因为它已经包含了所有组件
+    if active_config_name:
+        combo_dir_name = active_config_name
+        
     timestamp_str = datetime.now().strftime("%Y%m%d-%H%M%S")
     current_run_dir_name = timestamp_str
     

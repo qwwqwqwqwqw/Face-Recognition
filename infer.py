@@ -174,35 +174,35 @@ def infer(config: ConfigObject, cmd_args: argparse.Namespace):
         print(f"头部模块 ({loaded_loss_type.upper()}) 构建成功，输入特征维度: {backbone_out_dim}, 输出类别数: {loaded_num_classes}")
 
     # --- 加载模型权重 ---
-    if model_weights_path and os.path.exists(model_weights_path):
-        full_state_dict = paddle.load(model_weights_path)
-        
-        # 提取骨干网络权重
-        backbone_state_dict = {k.replace('backbone.', '', 1): v for k, v in full_state_dict.items() if k.startswith('backbone.')}
-        if backbone_state_dict:
-            model_backbone.set_state_dict(backbone_state_dict)
-            print(f"骨干网络权重从 {model_weights_path} 加载成功。")
-        else:
-            # 如果没有 'backbone.' 前缀，尝试直接加载整个 state_dict 到 backbone (可能模型只保存了骨干)
-            try:
-                model_backbone.set_state_dict(full_state_dict)
-                print(f"骨干网络权重 (可能为直接保存的骨干模型) 从 {model_weights_path} 加载成功。")
-            except Exception as e_direct_bb_load:
-                raise RuntimeError(f"错误: 在模型文件 {model_weights_path} 中未找到 'backbone.' 前缀的权重，并且直接加载整个状态字典到骨干网络失败: {e_direct_bb_load}。请确保模型文件与期望的结构一致。")
+    if not model_weights_path or not os.path.exists(model_weights_path):
+        raise FileNotFoundError(f"错误: 模型权重文件 '{model_weights_path}' 未找到或未指定。")
 
-        # 如果存在头部模型 (例如 CrossEntropy 模式)，则加载头部权重
-        if model_head:
-            head_state_dict = {k.replace('head.', '', 1): v for k, v in full_state_dict.items() if k.startswith('head.')}
-            if head_state_dict:
-                model_head.set_state_dict(head_state_dict)
-                print(f"头部模块 ({loaded_loss_type}) 权重从 {model_weights_path} 加载成功。")
-            else: # Head is instantiated, but no 'head.' prefixed weights found.
-                print(f"警告: 头部模块 ({loaded_loss_type}) 已实例化，但在模型文件 {model_weights_path} 中未找到 'head.' 前缀的权重。头部将使用其默认初始化权重。")
-        # If model_head is None (e.g., for ArcFace feature extraction path as currently coded in infer.py),
-        # no head loading is attempted, and no warnings about missing head weights are printed here.
+    # 如果代码执行到这里，说明 model_weights_path 是有效的并且文件存在
+    full_state_dict = paddle.load(model_weights_path)
+    
+    # 提取骨干网络权重
+    backbone_state_dict = {k.replace('backbone.', '', 1): v for k, v in full_state_dict.items() if k.startswith('backbone.')}
+    if backbone_state_dict:
+        model_backbone.set_state_dict(backbone_state_dict)
+        print(f"骨干网络权重从 {model_weights_path} 加载成功。")
+    else:
+        # 如果没有 'backbone.' 前缀，尝试直接加载整个 state_dict 到 backbone (可能模型只保存了骨干)
+        try:
+            model_backbone.set_state_dict(full_state_dict)
+            print(f"骨干网络权重 (可能为直接保存的骨干模型) 从 {model_weights_path} 加载成功。")
+        except Exception as e_direct_bb_load:
+            raise RuntimeError(f"错误: 在模型文件 {model_weights_path} 中未找到 'backbone.' 前缀的权重，并且直接加载整个状态字典到骨干网络失败: {e_direct_bb_load}。请确保模型文件与期望的结构一致。")
 
-        else:
-            raise FileNotFoundError(f"错误: 模型权重文件 {model_weights_path} 未找到或未指定。")
+    # 如果存在头部模型 (例如 CrossEntropy 模式)，则加载头部权重
+    if model_head:
+        head_state_dict = {k.replace('head.', '', 1): v for k, v in full_state_dict.items() if k.startswith('head.')}
+        if head_state_dict:
+            model_head.set_state_dict(head_state_dict)
+            print(f"头部模块 ({loaded_loss_type}) 权重从 {model_weights_path} 加载成功。")
+        else: # Head is instantiated, but no 'head.' prefixed weights found.
+            print(f"警告: 头部模块 ({loaded_loss_type}) 已实例化，但在模型文件 {model_weights_path} 中未找到 'head.' 前缀的权重。头部将使用其默认初始化权重。")
+    # If model_head is None (e.g., for ArcFace feature extraction path as currently coded in infer.py),
+    # no head loading is attempted, and no warnings about missing head weights are printed here.
 
     model_backbone.eval()
     if model_head:

@@ -54,34 +54,35 @@ class CreateDataList:
     def create_data_list(self, data_root_path: str, 
                          train_list_name: str = "trainer.list", 
                          test_list_name: str = "test.list", 
-                         acceptance_list_name: str = "acceptance.list", # 新增验收集列表文件名
+                         # acceptance_list_name: str = "acceptance.list", # 新增验收集列表文件名
                          meta_file_name: str = "readme.json",
                          train_ratio: float = 0.7, # 调整默认训练集比例
-                         acceptance_ratio: float = 0.1, # 新增验收集比例
+                         test_ratio: float = 0.3,  # 将验收集和测试集合并，使用一个 test_ratio
                          output_num_classes_file: str = None) -> None:
         """
-        生成训练、测试和验收数据列表文件，以及一个包含类别映射的元数据JSON文件。
+        生成训练、测试数据列表文件，以及一个包含类别映射的元数据JSON文件。
 
         Args:
             data_root_path (str): 数据集根目录的路径。
                                   期望的结构是: data_root_path/class_name/image_files
             train_list_name (str, optional): 输出的训练列表文件名。
             test_list_name (str, optional): 输出的测试列表文件名。
-            acceptance_list_name (str, optional): 输出的验收列表文件名。
+            # acceptance_list_name (str, optional): 输出的验收列表文件名。
             meta_file_name (str, optional): 输出的元数据JSON文件名。
             train_ratio (float, optional): 训练集所占的比例 (0.0 到 1.0)。
-            acceptance_ratio (float, optional): 验收集所占的比例 (0.0 到 1.0)。
-                                            测试集比例将是 1.0 - train_ratio - acceptance_ratio。
+            test_ratio (float, optional): 测试集所占的比例 (0.0 到 1.0)。
+                                            训练集比例将是 1.0 - test_ratio。
             output_num_classes_file (str, optional): 如果提供，将类别总数写入此文件。
 
         Raises:
-            ValueError: 如果 train_ratio 和 acceptance_ratio 的和不在 (0, 1) 区间内。
+            ValueError: 如果 train_ratio 和 test_ratio 的和不接近 1.0 或比例不合法。
             FileNotFoundError: 如果 data_root_path 不存在。
         """
         self._reset_state() #确保每次调用都是干净的状态
 
-        if not (0 < train_ratio < 1 and 0 <= acceptance_ratio < 1 and 0 < train_ratio + acceptance_ratio <= 1):
-            raise ValueError("train_ratio 必须在 (0,1) 开区间，acceptance_ratio 必须在 [0,1) 开区间，且它们的和必须在 (0, 1] 闭区间。")
+        # 确保训练集和测试集比例之和接近 1
+        if not (0 < train_ratio < 1 and 0 < test_ratio < 1 and 0.99 <= (train_ratio + test_ratio) <= 1.01):
+            raise ValueError("train_ratio 和 test_ratio 必须在 (0,1) 开区间，且它们的和必须接近 1.0。")
 
         if not os.path.exists(data_root_path):
             raise FileNotFoundError(f"指定的数据根目录 '{data_root_path}' 不存在。")
@@ -89,7 +90,7 @@ class CreateDataList:
         output_dir = data_root_path
         train_list_path = os.path.join(output_dir, train_list_name)
         test_list_path = os.path.join(output_dir, test_list_name)
-        acceptance_list_path = os.path.join(output_dir, acceptance_list_name)
+        # acceptance_list_path = os.path.join(output_dir, acceptance_list_name)
         meta_file_path = os.path.join(output_dir, meta_file_name)
 
         all_images_by_class = {} 
@@ -133,50 +134,52 @@ class CreateDataList:
             self.data_statistics["images_per_class"][class_name] = num_images_in_class
 
             num_train = int(num_images_in_class * train_ratio)
-            num_acceptance = int(num_images_in_class * acceptance_ratio)
-            num_test = num_images_in_class - num_train - num_acceptance
+            # num_acceptance = int(num_images_in_class * acceptance_ratio)
+            # num_test = num_images_in_class - num_train - num_acceptance
+            num_test = num_images_in_class - num_train # 将剩余的都作为测试集
 
             # 确保在样本极少时至少有一个训练样本，并调整其他集合大小
             if num_images_in_class > 0 and num_train == 0:
                 num_train = 1
-                if num_acceptance >= num_images_in_class - num_train:
-                    num_acceptance = num_images_in_class - num_train
-                num_test = num_images_in_class - num_train - num_acceptance
+                # if num_acceptance >= num_images_in_class - num_train:
+                #     num_acceptance = num_images_in_class - num_train
+                num_test = num_images_in_class - num_train # - num_acceptance
             
             if num_test < 0: # 如果测试集因取整变为负数，优先从验收集调整，再从训练集调整
-                if num_acceptance >= abs(num_test):
-                    num_acceptance += num_test # num_test is negative
-                else:
-                    remaining_negative = num_test + num_acceptance
-                    num_acceptance = 0
-                    num_train += remaining_negative
+                # if num_acceptance >= abs(num_test):
+                #     num_acceptance += num_test # num_test is negative
+                # else:
+                #     remaining_negative = num_test + num_acceptance
+                #     num_acceptance = 0
+                #     num_train += remaining_negative
+                num_train += num_test # num_test is negative, add it to train to balance
                 num_test = 0
             if num_train < 0: num_train = 0 # 防止训练集也变为负数（不太可能发生在此逻辑中）
 
 
             if current_class_id not in all_images_by_class:
-                 all_images_by_class[current_class_id] = {'train': [], 'test': [], 'acceptance': []}
+                 all_images_by_class[current_class_id] = {'train': [], 'test': []} # , 'acceptance': []}
 
             all_images_by_class[current_class_id]['train'].extend(images_in_class[:num_train])
-            all_images_by_class[current_class_id]['acceptance'].extend(images_in_class[num_train : num_train + num_acceptance])
-            all_images_by_class[current_class_id]['test'].extend(images_in_class[num_train + num_acceptance :])
+            # all_images_by_class[current_class_id]['acceptance'].extend(images_in_class[num_train : num_train + num_acceptance])
+            all_images_by_class[current_class_id]['test'].extend(images_in_class[num_train:]) # + num_acceptance :])
             
             self.data_statistics["train_set_count"] += len(all_images_by_class[current_class_id]['train'])
-            self.data_statistics["acceptance_set_count"] += len(all_images_by_class[current_class_id]['acceptance'])
+            # self.data_statistics["acceptance_set_count"] += len(all_images_by_class[current_class_id]['acceptance'])
             self.data_statistics["test_set_count"] += len(all_images_by_class[current_class_id]['test'])
 
         print(f"正在写入列表文件到: {output_dir}")
         with open(train_list_path, 'w', encoding='utf-8') as f_train, \
-             open(test_list_path, 'w', encoding='utf-8') as f_test, \
-             open(acceptance_list_path, 'w', encoding='utf-8') as f_accept:
+             open(test_list_path, 'w', encoding='utf-8') as f_test: #, \
+             # open(acceptance_list_path, 'w', encoding='utf-8') as f_accept:
             
             sorted_class_ids = sorted(all_images_by_class.keys())
 
             for class_id in sorted_class_ids:
                 for img_path in all_images_by_class[class_id]['train']:
                     f_train.write(f"{img_path}\t{class_id}\n")
-                for img_path in all_images_by_class[class_id]['acceptance']:
-                    f_accept.write(f"{img_path}\t{class_id}\n")
+                # for img_path in all_images_by_class[class_id]['acceptance']:
+                #     f_accept.write(f"{img_path}\t{class_id}\n")
                 for img_path in all_images_by_class[class_id]['test']:
                     f_test.write(f"{img_path}\t{class_id}\n")
         
@@ -189,10 +192,11 @@ class CreateDataList:
                 "data_root_path": data_root_path,
                 "train_list_name": train_list_name,
                 "test_list_name": test_list_name,
-                "acceptance_list_name": acceptance_list_name,
+                # "acceptance_list_name": acceptance_list_name,
                 "meta_file_name": meta_file_name,
                 "train_ratio_config": train_ratio,
-                "acceptance_ratio_config": acceptance_ratio,
+                # "acceptance_ratio_config": acceptance_ratio,
+                "test_ratio_config": test_ratio,
                 # 计算实际的测试集比例用于记录
                 "effective_test_ratio": (self.data_statistics['test_set_count'] / self.data_statistics['total_images'] 
                                          if self.data_statistics['total_images'] > 0 else 0)
@@ -217,7 +221,7 @@ class CreateDataList:
         print(f"总类别数: {self.data_statistics['total_classes']}")
         print(f"总图片数: {self.data_statistics['total_images']}")
         print(f"训练集图片数: {self.data_statistics['train_set_count']}")
-        print(f"验收集图片数: {self.data_statistics['acceptance_set_count']}")
+        # print(f"验收集图片数: {self.data_statistics['acceptance_set_count']}")
         print(f"测试集图片数: {self.data_statistics['test_set_count']}")
         print("-----------------------\n")
         print("数据列表创建完成。")
@@ -264,8 +268,8 @@ if __name__ == '__main__':
                              '如果未指定，则默认使用 data_root 目录。')
     parser.add_argument('--train_ratio', type=float, default=0.7,
                         help='训练集所占的比例 (0.0 到 1.0)，剩余部分为评估集。默认为 0.7。')
-    parser.add_argument('--acceptance_ratio', type=float, default=0.1,
-                        help='验收集所占的比例 (0.0 到 1.0)，测试集比例将是 1.0 - train_ratio - acceptance_ratio。默认为 0.1。')
+    parser.add_argument('--test_ratio', type=float, default=0.3,
+                        help='测试集所占的比例 (0.0 到 1.0)，训练集比例将是 1.0 - test_ratio。默认为 0.3。')
     parser.add_argument('--output_num_classes_file', type=str, default=None,
                         help='可选参数。指定一个文件路径，用于写入计算出的类别总数。'
                              '例如: /path/to/project/latest_num_classes.txt')
@@ -281,11 +285,10 @@ if __name__ == '__main__':
         data_root_path=args.data_root,
         train_list_name="trainer.list",
         test_list_name="test.list",
-        acceptance_list_name="acceptance.list",
         meta_file_name="readme.json",
         train_ratio=args.train_ratio,
-        acceptance_ratio=args.acceptance_ratio,
+        test_ratio=args.test_ratio,
         output_num_classes_file=args.output_num_classes_file
     )
     
-    print("\n脚本执行完毕。请检查在数据集根目录下生成的列表文件 (train_list.txt, eval_list.txt, acceptance_list.txt) 和元数据文件 (readme.json)。") 
+    print("\n脚本执行完毕。请检查在数据集根目录下生成的列表文件 (train_list.txt, eval_list.txt) 和元数据文件 (readme.json)。") 

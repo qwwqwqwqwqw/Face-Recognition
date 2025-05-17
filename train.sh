@@ -9,26 +9,77 @@ LOG_DIR="${PROJECT_DIR}/logs_Terminal" # 日志文件保存目录
 
 # 需要在本地 GPU 训练的配置块名称列表
 CONFIG_NAMES_TO_TRAIN=(
-    "vgg_ce_steplr_config"
-    "vgg_ce_multistep_config"
-    "vgg_ce_cosine_config"
-    "vgg_ce_reduce_lr_config"
-    "vgg_ce_warm_restarts_config"
-    "vgg_arcface_steplr_config"
-    "vgg_arcface_multistep_config"
-    "vgg_arcface_cosine_config"
-    "vgg_arcface_reduce_lr_config"
-    "vgg_arcface_warm_restarts_config"
-    "resnet_ce_steplr_config"
-    "resnet_ce_multistep_config"
-    "resnet_ce_cosine_config"
-    "resnet_ce_reduce_lr_config"
-    "resnet_ce_warm_restarts_config"
-    "resnet_arcface_steplr_config"
-    "resnet_arcface_multistep_config"
-    "resnet_arcface_cosine_config"
-    "resnet_arcface_reduce_lr_config"
-    "resnet_arcface_warm_restarts_config"
+    resnet_arcface_adamw_cosine_warmup_config
+    # "vgg_ce_steplr_config"
+    # "vgg_ce_multistep_config"
+    # "vgg_ce_cosine_config"
+    # "vgg_ce_reduce_lr_config"
+    # "vgg_ce_warm_restarts_config"
+    # "vgg_arcface_steplr_config"
+    # "vgg_arcface_multistep_config"
+    # "vgg_arcface_cosine_config"
+    # "vgg_arcface_reduce_lr_config"
+    # "vgg_arcface_warm_restarts_config"
+    # "resnet_ce_steplr_config"
+    # "resnet_ce_multistep_config"
+    # "resnet_ce_cosine_config"
+    # "resnet_ce_reduce_lr_config"
+    # "resnet_ce_warm_restarts_config"
+    # "resnet_arcface_steplr_config"
+    # "resnet_arcface_multistep_config"
+    # "resnet_arcface_cosine_config"
+    # "resnet_arcface_reduce_lr_config"
+    # "resnet_arcface_warm_restarts_config"
+
+    resnet_arcface_adamw_cosineannealingdecay_warmup_config # 推荐的默认组合
+    vgg_ce_adamw_stepdecay_config
+    vgg_ce_adamw_multistepdecay_config
+    vgg_ce_adamw_cosineannealingdecay_config
+    vgg_ce_adamw_reduceonplateau_config
+    vgg_ce_adamw_cosineannealingwarmrestarts_config
+    vgg_ce_adamw_polynomialdecay_config
+    vgg_ce_momentum_stepdecay_config
+    vgg_ce_momentum_multistepdecay_config
+    vgg_ce_momentum_cosineannealingdecay_config
+    vgg_ce_momentum_reduceonplateau_config
+    vgg_ce_momentum_cosineannealingwarmrestarts_config
+    vgg_ce_momentum_polynomialdecay_config
+    vgg_arcface_adamw_stepdecay_config
+    vgg_arcface_adamw_multistepdecay_config
+    vgg_arcface_adamw_cosineannealingdecay_config
+    vgg_arcface_adamw_reduceonplateau_config
+    vgg_arcface_adamw_cosineannealingwarmrestarts_config
+    vgg_arcface_adamw_polynomialdecay_config
+    vgg_arcface_momentum_stepdecay_config
+    vgg_arcface_momentum_multistepdecay_config
+    vgg_arcface_momentum_cosineannealingdecay_config
+    vgg_arcface_momentum_reduceonplateau_config
+    vgg_arcface_momentum_cosineannealingwarmrestarts_config
+    vgg_arcface_momentum_polynomialdecay_config
+    resnet_ce_adamw_stepdecay_config
+    resnet_ce_adamw_multistepdecay_config
+    resnet_ce_adamw_cosineannealingdecay_config
+    resnet_ce_adamw_reduceonplateau_config
+    resnet_ce_adamw_cosineannealingwarmrestarts_config
+    resnet_ce_adamw_polynomialdecay_config
+    resnet_ce_momentum_stepdecay_config
+    resnet_ce_momentum_multistepdecay_config
+    resnet_ce_momentum_cosineannealingdecay_config
+    resnet_ce_momentum_reduceonplateau_config
+    resnet_ce_momentum_cosineannealingwarmrestarts_config
+    resnet_ce_momentum_polynomialdecay_config
+    resnet_arcface_adamw_stepdecay_config 
+    # resnet_arcface_adamw_cosineannealingdecay_warmup_config # 推荐组合，已在列表开头
+    resnet_arcface_adamw_multistepdecay_config
+    resnet_arcface_adamw_reduceonplateau_config
+    resnet_arcface_adamw_cosineannealingwarmrestarts_config
+    resnet_arcface_adamw_polynomialdecay_config
+    resnet_arcface_momentum_stepdecay_config
+    resnet_arcface_momentum_multistepdecay_config
+    resnet_arcface_momentum_cosineannealingdecay_config
+    resnet_arcface_momentum_reduceonplateau_config
+    resnet_arcface_momentum_cosineannealingwarmrestarts_config
+    resnet_arcface_momentum_polynomialdecay_config
 )
 
 # --- 脚本开始 ---

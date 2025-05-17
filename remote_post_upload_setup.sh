@@ -8,7 +8,7 @@ set -e # 任何命令失败立即退出
 # 服务器上的项目根目录 (通常由调用者确定，但最好能从环境或固定路径获取)
 # REMOTE_PROJECT_DIR=$(cd "$(dirname "$0")" && pwd) # 假设脚本放在项目根目录
 REMOTE_PROJECT_DIR="/root/Face-Recognition" # 或者硬编码，如果确定
-VENV_PATH="${REMOTE_PROJECT_DIR}/paddle_env/bin/activate" # !!! 修改为您的虚拟环境路径 !!! 例如 paddle_env/bin/activate
+VENV_PATH="${REMOTE_PROJECT_DIR}/paddle/bin/activate" # !!! 修改为您的虚拟环境路径 !!! 例如 paddle_env/bin/activate
 
 # 数据集根目录，由第一个命令行参数传入
 DATA_ROOT_ON_SERVER="$1" 
