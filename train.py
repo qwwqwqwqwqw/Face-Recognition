@@ -626,7 +626,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', type=str, default=None, help='数据集根目录 (覆盖YAML)')
     parser.add_argument('--model_save_dir', type=str, default=None, help='模型检查点保存目录的父目录 (此参数作用已减弱, 实际路径由 visualdl_log_dir 和组合名决定)')
     parser.add_argument('--epochs', type=int, default=None, help='训练 epoch 数 (覆盖YAML)')
-    parser.add_argument('--batch_size', type=int, default=None, help='批处理大小 (覆盖YAML)')
+    parser.add_argument('--batchel_size', type=int, default=None, help='批处理大小 (覆盖YAML)')
     parser.add_argument('--learning_rate', type=float, default=None, help='初始学习率 (覆盖YAML)')
     parser.add_argument('--log_interval', type=int, default=None, help='控制台打印日志的 batch 间隔 (覆盖YAML)')
     parser.add_argument('--seed', type=int, default=None, help='随机种子 (覆盖YAML)')

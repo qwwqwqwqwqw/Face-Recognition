@@ -57,6 +57,7 @@ import paddle.optimizer.lr as lr_
 try:
     from paddle.optimizer.lr import Warmup
 except ImportError:
+    from paddle.optimizer.lr import LinearWarmup as Warmup
     print("警告: paddle.optimizer.lr 模块中未找到 Warmup 类。Warmup 功能将无法使用。")
     Warmup = None # Define a dummy class if Warmup is not available
 

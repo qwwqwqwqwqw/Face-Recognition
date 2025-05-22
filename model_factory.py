@@ -5,9 +5,11 @@
 # 使得在不修改训练、推理等主流程代码的前提下，能够灵活地切换和组合不同的模型架构。
 
 import paddle.nn as nn
-from models.vgg_backbone import VGGBackbone         # 导入VGG骨干网络定义
-from models.resnet_backbone import ResNetFace       # 导入ResNet骨干网络定义
-from heads import ArcFaceHead, CrossEntropyHead     # 从 heads.py 导入模型头部定义
+
+from heads import ArcFaceHead, CrossEntropyHead
+from models.resnet_backbone import ResNetFace
+from models.model_with_cbam_arcface import ResNetFaceCBAM
+from models.vgg_backbone import VGGBackbone
 
 def get_backbone(config_model_params: dict, model_type_str: str, image_size: int) -> tuple[nn.Layer, int]:
     """
@@ -56,6 +58,13 @@ def get_backbone(config_model_params: dict, model_type_str: str, image_size: int
         feature_dim_out = config_model_params.get('feature_dim', 512) # 默认为512
         
         backbone = ResNetFace(nf=nf, n=n_blocks, feature_dim=feature_dim_out)
+
+    elif model_type_str == 'resnet_cbam':
+        nf = config_model_params.get('nf', 32)
+        n_blocks = config_model_params.get('n_resnet_blocks', 3)
+        feature_dim_out = config_model_params.get('feature_dim', 512)
+        # 使用我们在 model_with_cbam_arcface.py 里定义的 ResNetFaceCBAM
+        backbone = ResNetFaceCBAM(nf=nf, n=n_blocks, feature_dim=feature_dim_out)
     else:
         # 如果请求了不支持的骨干网络类型，则抛出异常
         raise ValueError(f"不支持的骨干网络类型: {model_type_str}。支持的类型为 'vgg' 或 'resnet'。")
