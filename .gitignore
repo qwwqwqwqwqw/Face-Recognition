@@ -37,6 +37,10 @@ results/
 # Log files
 *.log
 logs/
+logs1/
+logs2/
+logs-泛化能力不足/
+logs_Terminal/
 
 # OS generated files
 .DS_Store

@@ -30,19 +30,13 @@ import time
 from datetime import datetime
 from visualdl import LogWriter # 引入 LogWriter
 import inspect
+import random
 import numpy as np # 确保导入 numpy
 
 # 引入用于模型导出的模块
 import paddle.jit
 import paddle.static
 import json # 导入json用于保存配置概要
-
-try:
-    from utils.utils import get_git_commit_hash
-except ImportError:
-    print("警告: 未找到 utils.py 或其中的 get_git_commit_hash 函数。Git Commit Hash 将无法记录。")
-    def get_git_commit_hash():
-        return "unknown"
 
 import random
 
@@ -92,8 +86,14 @@ def evaluate(model: nn.Layer, head: nn.Layer | None, eval_loader: paddle.io.Data
 
             if log_writer and batch_id == 0 and hasattr(config, 'log_eval_image_interval') and config.log_eval_image_interval is not None and (epoch + 1) % config.log_eval_image_interval == 0 :
                 num_images_to_log = min(4, images.shape[0])
-                for i in range(num_images_to_log):
-                    img_tensor = images[i]
+                # 随机选择要记录的图片索引
+                if images.shape[0] > 0:
+                    random_indices = random.sample(range(images.shape[0]), min(num_images_to_log, images.shape[0]))
+                else:
+                    random_indices = []
+
+                for i, idx in enumerate(random_indices): # Iterate over random indices
+                    img_tensor = images[idx] # Use random index
                     img_np_chw = img_tensor.numpy()
                     mean_unnorm = np.array(config.dataset_params.mean if hasattr(config.dataset_params, 'mean') and config.dataset_params.mean else [0.5, 0.5, 0.5]).reshape([3,1,1])
                     std_unnorm = np.array(config.dataset_params.std if hasattr(config.dataset_params, 'std') and config.dataset_params.std else [0.5, 0.5, 0.5]).reshape([3,1,1])
@@ -102,7 +102,7 @@ def evaluate(model: nn.Layer, head: nn.Layer | None, eval_loader: paddle.io.Data
                     img_hwc_uint8 = np.transpose(img_uint8_chw, (1, 2, 0))
                     task_name = config.class_name if hasattr(config, 'class_name') and config.class_name else "unknown_dataset"
                     log_writer.add_image(
-                        tag=f"Eval/{task_name}/Epoch{epoch + 1}_Sample{i}",
+                        tag=f"Eval/{task_name}/Epoch{epoch + 1}_RandomSample{i}", # Update tag to indicate random sample
                         img=img_hwc_uint8,
                         step=epoch + 1
                     )
@@ -190,8 +190,14 @@ def train_one_epoch(model: nn.Layer, head: nn.Layer | None, train_loader: paddle
 
         if log_writer and batch_id == 0 and hasattr(config, 'log_train_image_interval') and config.log_train_image_interval is not None and (epoch + 1) % config.log_train_image_interval == 0:
             num_images_to_log = min(4, images.shape[0])
-            for i in range(num_images_to_log):
-                img_tensor = images[i]
+             # 随机选择要记录的图片索引
+            if images.shape[0] > 0:
+                random_indices = random.sample(range(images.shape[0]), min(num_images_to_log, images.shape[0]))
+            else:
+                random_indices = []
+
+            for i, idx in enumerate(random_indices): # Iterate over random indices
+                img_tensor = images[idx] # Use random index
                 img_np_chw = img_tensor.numpy()
                 mean_unnorm = np.array(config.dataset_params.mean if hasattr(config.dataset_params, 'mean') and config.dataset_params.mean else [0.5, 0.5, 0.5]).reshape([3,1,1])
                 std_unnorm = np.array(config.dataset_params.std if hasattr(config.dataset_params, 'std') and config.dataset_params.std else [0.5, 0.5, 0.5]).reshape([3,1,1])
@@ -200,7 +206,7 @@ def train_one_epoch(model: nn.Layer, head: nn.Layer | None, train_loader: paddle
                 img_hwc_uint8 = np.transpose(img_uint8_chw, (1, 2, 0))
                 task_name = config.class_name if hasattr(config, 'class_name') and config.class_name else "unknown_dataset"
                 log_writer.add_image(
-                    tag=f"Train/{task_name}/Epoch{epoch+1}_Sample{i}",
+                    tag=f"Train/{task_name}/Epoch{epoch+1}_RandomSample{i}", # Update tag to indicate random sample
                     img=img_hwc_uint8,
                     step=epoch + 1
                 )
@@ -480,7 +486,6 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
             'image_size': final_config.image_size,
             'num_classes': final_config.num_classes,
             'seed': final_config.seed,
-            'git_hash': get_git_commit_hash(),
             'last_eval_accuracy': test_accuracy,
             'last_eval_loss': test_avg_loss,
             'previous_best_acc': best_acc,

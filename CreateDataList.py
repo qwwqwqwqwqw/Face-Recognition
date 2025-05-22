@@ -51,14 +51,15 @@ class CreateDataList:
             "images_per_class": {}
         }
 
-    def create_data_list(self, data_root_path: str, 
-                         train_list_name: str = "trainer.list", 
-                         test_list_name: str = "test.list", 
+    def create_data_list(self, data_root_path: str,
+                         train_list_name: str = "trainer.list",
+                         test_list_name: str = "test.list",
                          # acceptance_list_name: str = "acceptance.list", # 新增验收集列表文件名
                          meta_file_name: str = "readme.json",
                          train_ratio: float = 0.7, # 调整默认训练集比例
                          test_ratio: float = 0.3,  # 将验收集和测试集合并，使用一个 test_ratio
-                         output_num_classes_file: str = None) -> None:
+                         output_num_classes_file: str = None,
+                         output_dir: str = None) -> None:
         """
         生成训练、测试数据列表文件，以及一个包含类别映射的元数据JSON文件。
 
@@ -73,6 +74,7 @@ class CreateDataList:
             test_ratio (float, optional): 测试集所占的比例 (0.0 到 1.0)。
                                             训练集比例将是 1.0 - test_ratio。
             output_num_classes_file (str, optional): 如果提供，将类别总数写入此文件。
+            output_dir (str, optional): 如果提供，将列表文件保存到此目录。
 
         Raises:
             ValueError: 如果 train_ratio 和 test_ratio 的和不接近 1.0 或比例不合法。
@@ -87,11 +89,17 @@ class CreateDataList:
         if not os.path.exists(data_root_path):
             raise FileNotFoundError(f"指定的数据根目录 '{data_root_path}' 不存在。")
 
+        # Use the provided output_dir, or default to data_root_path
+        final_output_dir = output_dir if output_dir is not None else data_root_path
+
+        # Ensure the output directory exists
+        os.makedirs(final_output_dir, exist_ok=True)
+
         output_dir = data_root_path
-        train_list_path = os.path.join(output_dir, train_list_name)
-        test_list_path = os.path.join(output_dir, test_list_name)
+        train_list_path = os.path.join(final_output_dir, train_list_name)
+        test_list_path = os.path.join(final_output_dir, test_list_name)
         # acceptance_list_path = os.path.join(output_dir, acceptance_list_name)
-        meta_file_path = os.path.join(output_dir, meta_file_name)
+        meta_file_path = os.path.join(final_output_dir, meta_file_name)
 
         all_images_by_class = {} 
         
@@ -168,7 +176,7 @@ class CreateDataList:
             # self.data_statistics["acceptance_set_count"] += len(all_images_by_class[current_class_id]['acceptance'])
             self.data_statistics["test_set_count"] += len(all_images_by_class[current_class_id]['test'])
 
-        print(f"正在写入列表文件到: {output_dir}")
+        print(f"正在写入列表文件到: {final_output_dir}")
         with open(train_list_path, 'w', encoding='utf-8') as f_train, \
              open(test_list_path, 'w', encoding='utf-8') as f_test: #, \
              # open(acceptance_list_path, 'w', encoding='utf-8') as f_accept:
@@ -205,7 +213,7 @@ class CreateDataList:
         try:
             with open(meta_file_path, 'w', encoding='utf-8') as f_meta:
                 json.dump(meta_data_to_save, f_meta, indent=4, ensure_ascii=False)
-            print(f"元数据文件 '{meta_file_name}' 已保存到 '{output_dir}'.")
+            print(f"元数据文件 '{meta_file_name}' 已保存到 '{final_output_dir}'.")
         except Exception as e:
             print(f"错误: 保存元数据文件到 {meta_file_path} 失败: {e}")
 
@@ -288,7 +296,6 @@ if __name__ == '__main__':
         meta_file_name="readme.json",
         train_ratio=args.train_ratio,
         test_ratio=args.test_ratio,
-        output_num_classes_file=args.output_num_classes_file
+        output_num_classes_file=args.output_num_classes_file,
+        output_dir=args.output_dir
     )
-    
-    print("\n脚本执行完毕。请检查在数据集根目录下生成的列表文件 (train_list.txt, eval_list.txt) 和元数据文件 (readme.json)。") 

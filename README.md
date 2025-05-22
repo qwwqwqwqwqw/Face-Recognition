@@ -123,7 +123,6 @@
         # 确保 --active_config 与训练时一致，或 --model_path 指向对应模型
         python infer.py \\
             --config_path configs/default_config.yaml \\
-            --active_config resnet_arcface_cosine_config \\
             --model_path logs/resnet__arcface__CosineAnnealingDecay/YYYYMMDD-HHMMSS/checkpoints/best_model_resnet_arcface_cosine_config.pdparams \\
             --image_path data/face/person1/some_test_image.jpg \\
             --use_gpu
@@ -876,7 +875,7 @@ python train.py --config_path configs/default_config.yaml --active_config resnet
 
 ## 📄 许可证 (License)
 [(返回目录)](#-目录)
-本项目采用 [MIT] 许可证 (或其他您选择的许可证)。
+本项目采用 [MIT] 许可证。
 
 ## 🙏 致谢 (Acknowledgements)
 [(返回目录)](#-目录)

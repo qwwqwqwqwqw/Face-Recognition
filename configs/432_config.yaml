@@ -21,7 +21,7 @@
 # 脚本会根据这里的设置，从下方对应的配置块中加载训练、模型、损失函数等参数。
 # 请确保下方存在与此名称对应的配置块。
 # 这里默认选择推荐的组合及一套 LR/WD 默认值。
-active_config: resnet_ce_adamw_cosineannealingdecay_lr2_wd2_config
+active_config: resnet_ce_adamw_cosineannealingdecay_lr3_wd2_config
 
 # --- 全局默认设置 (设定一套合理的推荐参数作为所有实验的基础) ---
 # 大多数配置块将直接使用这里的参数，除非显式覆盖。
@@ -32,10 +32,10 @@ global_settings:
   data_dir: data                    # 数据集根目录的父目录 (例如 'data')
   class_name: face                  # 数据集类别目录名称 (例如 'face'), 数据列表在此目录下
   image_size: 112                   # 默认输入模型图像尺寸 (推荐使用112x112或更高)
-  num_classes: 6                    # 数据集类别数量 (输出层维度，以及用于 ArcFace/CrossEntropy 构建头部)。请根据您的数据集实际类别数量修改!!!
+  num_classes: 10                    # 数据集类别数量 (输出层维度，以及用于 ArcFace/CrossEntropy 构建头部)。请根据您的数据集实际类别数量修改!!!
   epochs: 20                       # 默认训练总轮数 (您可以根据需要修改这个全局默认值，所有组合将默认使用这个轮数)
   batch_size: 64                    # 默认批大小 (根据您的GPU显存调整，越大越好，但注意显存限制)
-  learning_rate: 0.001              # 默认初始学习率 (设置为一个常用值作为全局默认)
+  learning_rate: 0.00001              # 默认初始学习率 (设置为一个常用值作为全局默认)
   optimizer_type: AdamW             # 默认优化器类型 (AdamW 通常收敛更快)
   optimizer_params:
     momentum: 0.9                   # Momentum 优化器的默认参数 (当 optimizer_type='Momentum' 时生效)
@@ -103,6 +103,27 @@ global_settings:
     mean: [0.5, 0.5, 0.5]           # 图像标准化均值 (RGB)
     std: [0.5, 0.5, 0.5]            # 图像标准化标准差 (RGB)
 
+        # 新增数据增强配置
+    data_augmentation:
+      # 是否启用训练时的增强
+      use_train_augmentation: true
+      # 增强 transforms 列表及其参数
+      transforms:
+        # 随机水平翻转
+        RandomFlip: {prob: 0.5}
+        # 随机旋转 (示例: -10到10度之间)
+        RandomRotation: {degrees: 10}
+        # 随机裁剪 (示例: 裁剪后尺寸为原图的0.8到1.0倍)
+        RandomResizedCrop: {scale: [0.8, 1.0], ratio: [0.75, 1.333]}
+        # 颜色抖动 (示例: 调整亮度、对比度、饱和度)
+        ColorJitter: {brightness: 0.2, contrast: 0.2, saturation: 0.2}
+        # 随机擦除 (示例: 概率0.3，擦除区域占原图比例0.02-0.33)
+        RandomErasing: {prob: 0.3, scale: [0.02, 0.33], ratio: [0.3, 3.3]}
+      # 评估和验收时不进行复杂增强，只进行必要的resize和标准化
+      use_eval_augmentation: false # 评估时不使用上述transforms
+      use_acceptance_augmentation: false # 验收时不使用上述transforms
+
+
   # 日志和检查点参数 (train.py 期望从 config.log_interval, config.model_save_dir, etc. 读取)
   # 这些参数在当前脚本中是顶层参数，保持结构以兼容
   log_interval: 10                  # 训练控制台日志打印 batch 间隔
@@ -130,21 +151,21 @@ global_settings:
   create_library:
     model_path:                     # 创建库时使用的模型路径 (通常通过命令行 --model_path 或在此指定最佳模型的相对路径)
     output_library_path: face_library.pkl # 输出人脸库文件路径 (.pkl) (通常相对于模型文件目录)
-    data_list_for_library: train.list # 用于建库的数据列表文件名 (相对于 data_dir/class_name/)
+    data_list_for_library: trainer.list # 用于建库的数据列表文件名 (相对于 data_dir/class_name/)
 
 # --- 特定配置块 (包含所有正交组合，只覆盖关键类型和 LR/WD 参数) ---
 # 这些块仅指定 model_type, loss_type, optimizer_type, lr_scheduler_type, learning_rate, optimizer_params.weight_decay。
 # 所有其他参数将继承 global_settings 的默认值。
 
 # Define parameter values for orthogonal combinations
-model_types: [vgg, resnet]
+model_types: [resnet]
 loss_types: [ce, arcface]
 optimizer_types: [adamw, momentum]
 lr_scheduler_types: [stepdecay, multistepdecay, cosineannealingdecay, reduceonplateau, cosineannealingwarmrestarts, polynomialdecay]
 learning_rates:
-  lr1: 0.1
-  lr2: 0.01
-  lr3: 0.001
+  lr1: 0.001
+  lr2: 0.0001
+  lr3: 0.00001
 weight_decays: 
   wd1: 0.0001
   wd2: 0.001
@@ -160,7 +181,7 @@ vgg_ce_adamw_stepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -169,7 +190,7 @@ vgg_ce_adamw_stepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -178,7 +199,7 @@ vgg_ce_adamw_stepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -187,7 +208,7 @@ vgg_ce_adamw_stepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -196,7 +217,7 @@ vgg_ce_adamw_stepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -205,7 +226,7 @@ vgg_ce_adamw_stepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -214,7 +235,7 @@ vgg_ce_adamw_stepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -223,7 +244,7 @@ vgg_ce_adamw_stepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -232,7 +253,7 @@ vgg_ce_adamw_stepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -241,7 +262,7 @@ vgg_ce_adamw_multistepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -250,7 +271,7 @@ vgg_ce_adamw_multistepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -259,7 +280,7 @@ vgg_ce_adamw_multistepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -268,7 +289,7 @@ vgg_ce_adamw_multistepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -277,7 +298,7 @@ vgg_ce_adamw_multistepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -286,7 +307,7 @@ vgg_ce_adamw_multistepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -295,7 +316,7 @@ vgg_ce_adamw_multistepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -304,7 +325,7 @@ vgg_ce_adamw_multistepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -313,7 +334,7 @@ vgg_ce_adamw_multistepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -322,7 +343,7 @@ vgg_ce_adamw_cosineannealingdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -331,7 +352,7 @@ vgg_ce_adamw_cosineannealingdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -340,7 +361,7 @@ vgg_ce_adamw_cosineannealingdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -349,7 +370,7 @@ vgg_ce_adamw_cosineannealingdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -358,7 +379,7 @@ vgg_ce_adamw_cosineannealingdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -367,7 +388,7 @@ vgg_ce_adamw_cosineannealingdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -376,7 +397,7 @@ vgg_ce_adamw_cosineannealingdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -385,7 +406,7 @@ vgg_ce_adamw_cosineannealingdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -394,7 +415,7 @@ vgg_ce_adamw_cosineannealingdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -403,7 +424,7 @@ vgg_ce_adamw_reduceonplateau_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -412,7 +433,7 @@ vgg_ce_adamw_reduceonplateau_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -421,7 +442,7 @@ vgg_ce_adamw_reduceonplateau_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -430,7 +451,7 @@ vgg_ce_adamw_reduceonplateau_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -439,7 +460,7 @@ vgg_ce_adamw_reduceonplateau_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -448,7 +469,7 @@ vgg_ce_adamw_reduceonplateau_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -457,7 +478,7 @@ vgg_ce_adamw_reduceonplateau_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -466,7 +487,7 @@ vgg_ce_adamw_reduceonplateau_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -475,7 +496,7 @@ vgg_ce_adamw_reduceonplateau_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -484,7 +505,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -493,7 +514,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -502,7 +523,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -511,7 +532,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -520,7 +541,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -529,7 +550,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -538,7 +559,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -547,7 +568,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -556,7 +577,7 @@ vgg_ce_adamw_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -565,7 +586,7 @@ vgg_ce_adamw_polynomialdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -574,7 +595,7 @@ vgg_ce_adamw_polynomialdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -583,7 +604,7 @@ vgg_ce_adamw_polynomialdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -592,7 +613,7 @@ vgg_ce_adamw_polynomialdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -601,7 +622,7 @@ vgg_ce_adamw_polynomialdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -610,7 +631,7 @@ vgg_ce_adamw_polynomialdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -619,7 +640,7 @@ vgg_ce_adamw_polynomialdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -628,7 +649,7 @@ vgg_ce_adamw_polynomialdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -637,7 +658,7 @@ vgg_ce_adamw_polynomialdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -646,7 +667,7 @@ vgg_ce_momentum_stepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -655,7 +676,7 @@ vgg_ce_momentum_stepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -664,7 +685,7 @@ vgg_ce_momentum_stepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -673,7 +694,7 @@ vgg_ce_momentum_stepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -682,7 +703,7 @@ vgg_ce_momentum_stepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -691,7 +712,7 @@ vgg_ce_momentum_stepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -700,7 +721,7 @@ vgg_ce_momentum_stepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -709,7 +730,7 @@ vgg_ce_momentum_stepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -718,7 +739,7 @@ vgg_ce_momentum_stepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -727,7 +748,7 @@ vgg_ce_momentum_multistepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -736,7 +757,7 @@ vgg_ce_momentum_multistepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -745,7 +766,7 @@ vgg_ce_momentum_multistepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -754,7 +775,7 @@ vgg_ce_momentum_multistepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -763,7 +784,7 @@ vgg_ce_momentum_multistepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -772,7 +793,7 @@ vgg_ce_momentum_multistepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -781,7 +802,7 @@ vgg_ce_momentum_multistepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -790,7 +811,7 @@ vgg_ce_momentum_multistepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -799,7 +820,7 @@ vgg_ce_momentum_multistepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -808,7 +829,7 @@ vgg_ce_momentum_cosineannealingdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -817,7 +838,7 @@ vgg_ce_momentum_cosineannealingdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -826,7 +847,7 @@ vgg_ce_momentum_cosineannealingdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -835,7 +856,7 @@ vgg_ce_momentum_cosineannealingdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -844,7 +865,7 @@ vgg_ce_momentum_cosineannealingdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -853,7 +874,7 @@ vgg_ce_momentum_cosineannealingdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -862,7 +883,7 @@ vgg_ce_momentum_cosineannealingdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -871,7 +892,7 @@ vgg_ce_momentum_cosineannealingdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -880,7 +901,7 @@ vgg_ce_momentum_cosineannealingdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -889,7 +910,7 @@ vgg_ce_momentum_reduceonplateau_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -898,7 +919,7 @@ vgg_ce_momentum_reduceonplateau_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -907,7 +928,7 @@ vgg_ce_momentum_reduceonplateau_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -916,7 +937,7 @@ vgg_ce_momentum_reduceonplateau_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -925,7 +946,7 @@ vgg_ce_momentum_reduceonplateau_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -934,7 +955,7 @@ vgg_ce_momentum_reduceonplateau_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -943,7 +964,7 @@ vgg_ce_momentum_reduceonplateau_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -952,7 +973,7 @@ vgg_ce_momentum_reduceonplateau_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -961,7 +982,7 @@ vgg_ce_momentum_reduceonplateau_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -970,7 +991,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -979,7 +1000,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -988,7 +1009,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -997,7 +1018,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1006,7 +1027,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1015,7 +1036,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1024,7 +1045,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1033,7 +1054,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1042,7 +1063,7 @@ vgg_ce_momentum_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1051,7 +1072,7 @@ vgg_ce_momentum_polynomialdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1060,7 +1081,7 @@ vgg_ce_momentum_polynomialdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1069,7 +1090,7 @@ vgg_ce_momentum_polynomialdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1078,7 +1099,7 @@ vgg_ce_momentum_polynomialdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1087,7 +1108,7 @@ vgg_ce_momentum_polynomialdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1096,7 +1117,7 @@ vgg_ce_momentum_polynomialdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1105,7 +1126,7 @@ vgg_ce_momentum_polynomialdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1114,7 +1135,7 @@ vgg_ce_momentum_polynomialdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1123,7 +1144,7 @@ vgg_ce_momentum_polynomialdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1133,7 +1154,7 @@ vgg_arcface_adamw_stepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1142,7 +1163,7 @@ vgg_arcface_adamw_stepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1151,7 +1172,7 @@ vgg_arcface_adamw_stepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1160,7 +1181,7 @@ vgg_arcface_adamw_stepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1169,7 +1190,7 @@ vgg_arcface_adamw_stepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1178,7 +1199,7 @@ vgg_arcface_adamw_stepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1187,7 +1208,7 @@ vgg_arcface_adamw_stepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1196,7 +1217,7 @@ vgg_arcface_adamw_stepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1205,7 +1226,7 @@ vgg_arcface_adamw_stepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1214,7 +1235,7 @@ vgg_arcface_adamw_multistepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1223,7 +1244,7 @@ vgg_arcface_adamw_multistepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1232,7 +1253,7 @@ vgg_arcface_adamw_multistepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1241,7 +1262,7 @@ vgg_arcface_adamw_multistepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1250,7 +1271,7 @@ vgg_arcface_adamw_multistepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1259,7 +1280,7 @@ vgg_arcface_adamw_multistepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1268,7 +1289,7 @@ vgg_arcface_adamw_multistepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1277,7 +1298,7 @@ vgg_arcface_adamw_multistepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1286,7 +1307,7 @@ vgg_arcface_adamw_multistepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1295,7 +1316,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1304,7 +1325,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1313,7 +1334,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1322,7 +1343,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1331,7 +1352,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1340,7 +1361,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1349,7 +1370,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1358,7 +1379,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1367,7 +1388,7 @@ vgg_arcface_adamw_cosineannealingdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1376,7 +1397,7 @@ vgg_arcface_adamw_reduceonplateau_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1385,7 +1406,7 @@ vgg_arcface_adamw_reduceonplateau_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1394,7 +1415,7 @@ vgg_arcface_adamw_reduceonplateau_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1403,7 +1424,7 @@ vgg_arcface_adamw_reduceonplateau_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1412,7 +1433,7 @@ vgg_arcface_adamw_reduceonplateau_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1421,7 +1442,7 @@ vgg_arcface_adamw_reduceonplateau_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1430,7 +1451,7 @@ vgg_arcface_adamw_reduceonplateau_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1439,7 +1460,7 @@ vgg_arcface_adamw_reduceonplateau_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1448,7 +1469,7 @@ vgg_arcface_adamw_reduceonplateau_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1457,7 +1478,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1466,7 +1487,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1475,7 +1496,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1484,7 +1505,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1493,7 +1514,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1502,7 +1523,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1511,7 +1532,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1520,7 +1541,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1529,7 +1550,7 @@ vgg_arcface_adamw_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1538,7 +1559,7 @@ vgg_arcface_adamw_polynomialdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1547,7 +1568,7 @@ vgg_arcface_adamw_polynomialdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1556,7 +1577,7 @@ vgg_arcface_adamw_polynomialdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1565,7 +1586,7 @@ vgg_arcface_adamw_polynomialdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1574,7 +1595,7 @@ vgg_arcface_adamw_polynomialdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1583,7 +1604,7 @@ vgg_arcface_adamw_polynomialdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1592,7 +1613,7 @@ vgg_arcface_adamw_polynomialdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1601,7 +1622,7 @@ vgg_arcface_adamw_polynomialdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1610,7 +1631,7 @@ vgg_arcface_adamw_polynomialdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1619,7 +1640,7 @@ vgg_arcface_momentum_stepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1628,7 +1649,7 @@ vgg_arcface_momentum_stepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1637,7 +1658,7 @@ vgg_arcface_momentum_stepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1646,7 +1667,7 @@ vgg_arcface_momentum_stepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1655,7 +1676,7 @@ vgg_arcface_momentum_stepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1664,7 +1685,7 @@ vgg_arcface_momentum_stepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1673,7 +1694,7 @@ vgg_arcface_momentum_stepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1682,7 +1703,7 @@ vgg_arcface_momentum_stepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1691,7 +1712,7 @@ vgg_arcface_momentum_stepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1700,7 +1721,7 @@ vgg_arcface_momentum_multistepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1709,7 +1730,7 @@ vgg_arcface_momentum_multistepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1718,7 +1739,7 @@ vgg_arcface_momentum_multistepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1727,7 +1748,7 @@ vgg_arcface_momentum_multistepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1736,7 +1757,7 @@ vgg_arcface_momentum_multistepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1745,7 +1766,7 @@ vgg_arcface_momentum_multistepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1754,7 +1775,7 @@ vgg_arcface_momentum_multistepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1763,7 +1784,7 @@ vgg_arcface_momentum_multistepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1772,7 +1793,7 @@ vgg_arcface_momentum_multistepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1781,7 +1802,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1790,7 +1811,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1799,7 +1820,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1808,7 +1829,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1817,7 +1838,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1826,7 +1847,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1835,7 +1856,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1844,7 +1865,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1853,7 +1874,7 @@ vgg_arcface_momentum_cosineannealingdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1862,7 +1883,7 @@ vgg_arcface_momentum_reduceonplateau_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1871,7 +1892,7 @@ vgg_arcface_momentum_reduceonplateau_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1880,7 +1901,7 @@ vgg_arcface_momentum_reduceonplateau_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1889,7 +1910,7 @@ vgg_arcface_momentum_reduceonplateau_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1898,7 +1919,7 @@ vgg_arcface_momentum_reduceonplateau_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1907,7 +1928,7 @@ vgg_arcface_momentum_reduceonplateau_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1916,7 +1937,7 @@ vgg_arcface_momentum_reduceonplateau_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1925,7 +1946,7 @@ vgg_arcface_momentum_reduceonplateau_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1934,7 +1955,7 @@ vgg_arcface_momentum_reduceonplateau_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1943,7 +1964,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1952,7 +1973,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1961,7 +1982,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1970,7 +1991,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -1979,7 +2000,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -1988,7 +2009,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -1997,7 +2018,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2006,7 +2027,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2015,7 +2036,7 @@ vgg_arcface_momentum_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2024,7 +2045,7 @@ vgg_arcface_momentum_polynomialdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2033,7 +2054,7 @@ vgg_arcface_momentum_polynomialdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2042,7 +2063,7 @@ vgg_arcface_momentum_polynomialdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2051,7 +2072,7 @@ vgg_arcface_momentum_polynomialdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2060,7 +2081,7 @@ vgg_arcface_momentum_polynomialdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2069,7 +2090,7 @@ vgg_arcface_momentum_polynomialdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2078,7 +2099,7 @@ vgg_arcface_momentum_polynomialdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2087,7 +2108,7 @@ vgg_arcface_momentum_polynomialdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2096,7 +2117,7 @@ vgg_arcface_momentum_polynomialdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2106,7 +2127,7 @@ resnet_ce_adamw_stepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2115,7 +2136,7 @@ resnet_ce_adamw_stepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2124,7 +2145,7 @@ resnet_ce_adamw_stepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2133,7 +2154,7 @@ resnet_ce_adamw_stepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2142,7 +2163,7 @@ resnet_ce_adamw_stepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2151,7 +2172,7 @@ resnet_ce_adamw_stepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2160,7 +2181,7 @@ resnet_ce_adamw_stepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2169,7 +2190,7 @@ resnet_ce_adamw_stepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2178,7 +2199,7 @@ resnet_ce_adamw_stepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2187,7 +2208,7 @@ resnet_ce_adamw_multistepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2196,7 +2217,7 @@ resnet_ce_adamw_multistepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2205,7 +2226,7 @@ resnet_ce_adamw_multistepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2214,7 +2235,7 @@ resnet_ce_adamw_multistepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2223,7 +2244,7 @@ resnet_ce_adamw_multistepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2232,7 +2253,7 @@ resnet_ce_adamw_multistepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2241,7 +2262,7 @@ resnet_ce_adamw_multistepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2250,7 +2271,7 @@ resnet_ce_adamw_multistepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2259,7 +2280,7 @@ resnet_ce_adamw_multistepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2268,7 +2289,7 @@ resnet_ce_adamw_cosineannealingdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2277,7 +2298,7 @@ resnet_ce_adamw_cosineannealingdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2286,7 +2307,7 @@ resnet_ce_adamw_cosineannealingdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2295,7 +2316,7 @@ resnet_ce_adamw_cosineannealingdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2304,7 +2325,7 @@ resnet_ce_adamw_cosineannealingdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2313,7 +2334,7 @@ resnet_ce_adamw_cosineannealingdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2322,7 +2343,7 @@ resnet_ce_adamw_cosineannealingdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2331,7 +2352,7 @@ resnet_ce_adamw_cosineannealingdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2340,7 +2361,7 @@ resnet_ce_adamw_cosineannealingdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2349,7 +2370,7 @@ resnet_ce_adamw_reduceonplateau_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2358,7 +2379,7 @@ resnet_ce_adamw_reduceonplateau_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2367,7 +2388,7 @@ resnet_ce_adamw_reduceonplateau_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2376,7 +2397,7 @@ resnet_ce_adamw_reduceonplateau_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2385,7 +2406,7 @@ resnet_ce_adamw_reduceonplateau_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2394,7 +2415,7 @@ resnet_ce_adamw_reduceonplateau_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2403,7 +2424,7 @@ resnet_ce_adamw_reduceonplateau_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2412,7 +2433,7 @@ resnet_ce_adamw_reduceonplateau_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2421,7 +2442,7 @@ resnet_ce_adamw_reduceonplateau_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2430,7 +2451,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2439,7 +2460,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2448,7 +2469,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2457,7 +2478,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2466,7 +2487,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2475,7 +2496,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2484,7 +2505,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2493,7 +2514,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2502,7 +2523,7 @@ resnet_ce_adamw_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2511,7 +2532,7 @@ resnet_ce_adamw_polynomialdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2520,7 +2541,7 @@ resnet_ce_adamw_polynomialdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2529,7 +2550,7 @@ resnet_ce_adamw_polynomialdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2538,7 +2559,7 @@ resnet_ce_adamw_polynomialdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2547,7 +2568,7 @@ resnet_ce_adamw_polynomialdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2556,7 +2577,7 @@ resnet_ce_adamw_polynomialdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2565,7 +2586,7 @@ resnet_ce_adamw_polynomialdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2574,7 +2595,7 @@ resnet_ce_adamw_polynomialdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2583,7 +2604,7 @@ resnet_ce_adamw_polynomialdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2592,7 +2613,7 @@ resnet_ce_momentum_stepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2601,7 +2622,7 @@ resnet_ce_momentum_stepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2610,7 +2631,7 @@ resnet_ce_momentum_stepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2619,7 +2640,7 @@ resnet_ce_momentum_stepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2628,7 +2649,7 @@ resnet_ce_momentum_stepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2637,7 +2658,7 @@ resnet_ce_momentum_stepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2646,7 +2667,7 @@ resnet_ce_momentum_stepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2655,7 +2676,7 @@ resnet_ce_momentum_stepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2664,7 +2685,7 @@ resnet_ce_momentum_stepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2673,7 +2694,7 @@ resnet_ce_momentum_multistepdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2682,7 +2703,7 @@ resnet_ce_momentum_multistepdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2691,7 +2712,7 @@ resnet_ce_momentum_multistepdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2700,7 +2721,7 @@ resnet_ce_momentum_multistepdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2709,7 +2730,7 @@ resnet_ce_momentum_multistepdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2718,7 +2739,7 @@ resnet_ce_momentum_multistepdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2727,7 +2748,7 @@ resnet_ce_momentum_multistepdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2736,7 +2757,7 @@ resnet_ce_momentum_multistepdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2745,7 +2766,7 @@ resnet_ce_momentum_multistepdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2754,7 +2775,7 @@ resnet_ce_momentum_cosineannealingdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2763,7 +2784,7 @@ resnet_ce_momentum_cosineannealingdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2772,7 +2793,7 @@ resnet_ce_momentum_cosineannealingdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2781,7 +2802,7 @@ resnet_ce_momentum_cosineannealingdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2790,7 +2811,7 @@ resnet_ce_momentum_cosineannealingdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2799,7 +2820,7 @@ resnet_ce_momentum_cosineannealingdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2808,7 +2829,7 @@ resnet_ce_momentum_cosineannealingdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2817,7 +2838,7 @@ resnet_ce_momentum_cosineannealingdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2826,7 +2847,7 @@ resnet_ce_momentum_cosineannealingdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2835,7 +2856,7 @@ resnet_ce_momentum_reduceonplateau_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2844,7 +2865,7 @@ resnet_ce_momentum_reduceonplateau_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2853,7 +2874,7 @@ resnet_ce_momentum_reduceonplateau_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2862,7 +2883,7 @@ resnet_ce_momentum_reduceonplateau_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2871,7 +2892,7 @@ resnet_ce_momentum_reduceonplateau_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2880,7 +2901,7 @@ resnet_ce_momentum_reduceonplateau_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2889,7 +2910,7 @@ resnet_ce_momentum_reduceonplateau_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2898,7 +2919,7 @@ resnet_ce_momentum_reduceonplateau_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2907,7 +2928,7 @@ resnet_ce_momentum_reduceonplateau_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2916,7 +2937,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2925,7 +2946,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2934,7 +2955,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2943,7 +2964,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2952,7 +2973,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2961,7 +2982,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2970,7 +2991,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -2979,7 +3000,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -2988,7 +3009,7 @@ resnet_ce_momentum_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -2997,7 +3018,7 @@ resnet_ce_momentum_polynomialdecay_lr1_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3006,7 +3027,7 @@ resnet_ce_momentum_polynomialdecay_lr1_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3015,7 +3036,7 @@ resnet_ce_momentum_polynomialdecay_lr1_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3024,7 +3045,7 @@ resnet_ce_momentum_polynomialdecay_lr2_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3033,7 +3054,7 @@ resnet_ce_momentum_polynomialdecay_lr2_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3042,7 +3063,7 @@ resnet_ce_momentum_polynomialdecay_lr2_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3051,7 +3072,7 @@ resnet_ce_momentum_polynomialdecay_lr3_wd1_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3060,7 +3081,7 @@ resnet_ce_momentum_polynomialdecay_lr3_wd2_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3069,7 +3090,7 @@ resnet_ce_momentum_polynomialdecay_lr3_wd3_config:
   loss_type: cross_entropy
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3079,7 +3100,7 @@ resnet_arcface_adamw_stepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3088,7 +3109,7 @@ resnet_arcface_adamw_stepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3097,7 +3118,7 @@ resnet_arcface_adamw_stepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3106,7 +3127,7 @@ resnet_arcface_adamw_stepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3115,7 +3136,7 @@ resnet_arcface_adamw_stepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3124,7 +3145,7 @@ resnet_arcface_adamw_stepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3133,7 +3154,7 @@ resnet_arcface_adamw_stepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3142,7 +3163,7 @@ resnet_arcface_adamw_stepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3151,7 +3172,7 @@ resnet_arcface_adamw_stepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3160,7 +3181,7 @@ resnet_arcface_adamw_multistepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3169,7 +3190,7 @@ resnet_arcface_adamw_multistepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3178,7 +3199,7 @@ resnet_arcface_adamw_multistepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3187,7 +3208,7 @@ resnet_arcface_adamw_multistepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3196,7 +3217,7 @@ resnet_arcface_adamw_multistepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3205,7 +3226,7 @@ resnet_arcface_adamw_multistepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3214,7 +3235,7 @@ resnet_arcface_adamw_multistepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3223,7 +3244,7 @@ resnet_arcface_adamw_multistepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3232,7 +3253,7 @@ resnet_arcface_adamw_multistepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3241,7 +3262,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3250,7 +3271,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3259,7 +3280,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3268,7 +3289,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3277,7 +3298,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3286,7 +3307,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3295,7 +3316,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3304,7 +3325,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3313,7 +3334,7 @@ resnet_arcface_adamw_cosineannealingdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3322,7 +3343,7 @@ resnet_arcface_adamw_reduceonplateau_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3331,7 +3352,7 @@ resnet_arcface_adamw_reduceonplateau_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3340,7 +3361,7 @@ resnet_arcface_adamw_reduceonplateau_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3349,7 +3370,7 @@ resnet_arcface_adamw_reduceonplateau_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3358,7 +3379,7 @@ resnet_arcface_adamw_reduceonplateau_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3367,7 +3388,7 @@ resnet_arcface_adamw_reduceonplateau_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3376,7 +3397,7 @@ resnet_arcface_adamw_reduceonplateau_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3385,7 +3406,7 @@ resnet_arcface_adamw_reduceonplateau_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3394,7 +3415,7 @@ resnet_arcface_adamw_reduceonplateau_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3403,7 +3424,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3412,7 +3433,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3421,7 +3442,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3430,7 +3451,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3439,7 +3460,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3448,7 +3469,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3457,7 +3478,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3466,7 +3487,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3475,7 +3496,7 @@ resnet_arcface_adamw_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3484,7 +3505,7 @@ resnet_arcface_adamw_polynomialdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3493,7 +3514,7 @@ resnet_arcface_adamw_polynomialdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3502,7 +3523,7 @@ resnet_arcface_adamw_polynomialdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3511,7 +3532,7 @@ resnet_arcface_adamw_polynomialdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3520,7 +3541,7 @@ resnet_arcface_adamw_polynomialdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3529,7 +3550,7 @@ resnet_arcface_adamw_polynomialdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3538,7 +3559,7 @@ resnet_arcface_adamw_polynomialdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3547,7 +3568,7 @@ resnet_arcface_adamw_polynomialdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3556,7 +3577,7 @@ resnet_arcface_adamw_polynomialdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: AdamW
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3565,7 +3586,7 @@ resnet_arcface_momentum_stepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3574,7 +3595,7 @@ resnet_arcface_momentum_stepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3583,7 +3604,7 @@ resnet_arcface_momentum_stepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3592,7 +3613,7 @@ resnet_arcface_momentum_stepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3601,7 +3622,7 @@ resnet_arcface_momentum_stepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3610,7 +3631,7 @@ resnet_arcface_momentum_stepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3619,7 +3640,7 @@ resnet_arcface_momentum_stepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3628,7 +3649,7 @@ resnet_arcface_momentum_stepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3637,7 +3658,7 @@ resnet_arcface_momentum_stepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: StepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3646,7 +3667,7 @@ resnet_arcface_momentum_multistepdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3655,7 +3676,7 @@ resnet_arcface_momentum_multistepdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3664,7 +3685,7 @@ resnet_arcface_momentum_multistepdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3673,7 +3694,7 @@ resnet_arcface_momentum_multistepdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3682,7 +3703,7 @@ resnet_arcface_momentum_multistepdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3691,7 +3712,7 @@ resnet_arcface_momentum_multistepdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3700,7 +3721,7 @@ resnet_arcface_momentum_multistepdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3709,7 +3730,7 @@ resnet_arcface_momentum_multistepdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3718,7 +3739,7 @@ resnet_arcface_momentum_multistepdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: MultiStepDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3727,7 +3748,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3736,7 +3757,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3745,7 +3766,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3754,7 +3775,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3763,7 +3784,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3772,7 +3793,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3781,7 +3802,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3790,7 +3811,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3799,7 +3820,7 @@ resnet_arcface_momentum_cosineannealingdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3808,7 +3829,7 @@ resnet_arcface_momentum_reduceonplateau_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3817,7 +3838,7 @@ resnet_arcface_momentum_reduceonplateau_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3826,7 +3847,7 @@ resnet_arcface_momentum_reduceonplateau_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3835,7 +3856,7 @@ resnet_arcface_momentum_reduceonplateau_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3844,7 +3865,7 @@ resnet_arcface_momentum_reduceonplateau_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3853,7 +3874,7 @@ resnet_arcface_momentum_reduceonplateau_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3862,7 +3883,7 @@ resnet_arcface_momentum_reduceonplateau_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3871,7 +3892,7 @@ resnet_arcface_momentum_reduceonplateau_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3880,7 +3901,7 @@ resnet_arcface_momentum_reduceonplateau_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: ReduceOnPlateau
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3889,7 +3910,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3898,7 +3919,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3907,7 +3928,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3916,7 +3937,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3925,7 +3946,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3934,7 +3955,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3943,7 +3964,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3952,7 +3973,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3961,7 +3982,7 @@ resnet_arcface_momentum_cosineannealingwarmrestarts_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: CosineAnnealingWarmRestarts
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3970,7 +3991,7 @@ resnet_arcface_momentum_polynomialdecay_lr1_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -3979,7 +4000,7 @@ resnet_arcface_momentum_polynomialdecay_lr1_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.001
 
@@ -3988,7 +4009,7 @@ resnet_arcface_momentum_polynomialdecay_lr1_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.1
+  learning_rate: 0.001
   optimizer_params:
     weight_decay: 0.01
 
@@ -3997,7 +4018,7 @@ resnet_arcface_momentum_polynomialdecay_lr2_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -4006,7 +4027,7 @@ resnet_arcface_momentum_polynomialdecay_lr2_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.001
 
@@ -4015,7 +4036,7 @@ resnet_arcface_momentum_polynomialdecay_lr2_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.01
+  learning_rate: 0.0001
   optimizer_params:
     weight_decay: 0.01
 
@@ -4024,7 +4045,7 @@ resnet_arcface_momentum_polynomialdecay_lr3_wd1_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.0001
 
@@ -4033,7 +4054,7 @@ resnet_arcface_momentum_polynomialdecay_lr3_wd2_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.001
 
@@ -4042,7 +4063,7 @@ resnet_arcface_momentum_polynomialdecay_lr3_wd3_config:
   loss_type: arcface
   optimizer_type: Momentum
   lr_scheduler_type: PolynomialDecay
-  learning_rate: 0.001
+  learning_rate: 0.00001
   optimizer_params:
     weight_decay: 0.01
 

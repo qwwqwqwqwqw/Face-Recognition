@@ -157,6 +157,26 @@ global_settings:
     #在实践中，如果您发现模型收敛困难或性能不佳，可以尝试更换为基于 ImageNet 的统计值，看看是否有改善。
     #一旦确定了 mean 和 std，训练、建库、推理、对比时都必须保持一致！
 
+    # 新增数据增强配置
+    data_augmentation:
+      # 是否启用训练时的增强
+      use_train_augmentation: true
+      # 增强 transforms 列表及其参数
+      transforms:
+        # 随机水平翻转
+        RandomFlip: {prob: 0.5}
+        # 随机旋转 (示例: -10到10度之间)
+        RandomRotation: {degrees: 10}
+        # 随机裁剪 (示例: 裁剪后尺寸为原图的0.8到1.0倍)
+        RandomResizedCrop: {scale: [0.8, 1.0], ratio: [0.75, 1.333]}
+        # 颜色抖动 (示例: 调整亮度、对比度、饱和度)
+        ColorJitter: {brightness: 0.2, contrast: 0.2, saturation: 0.2}
+        # 随机擦除 (示例: 概率0.3，擦除区域占原图比例0.02-0.33)
+        RandomErasing: {prob: 0.3, scale: [0.02, 0.33], ratio: [0.3, 3.3]}
+      # 评估和验收时不进行复杂增强，只进行必要的resize和标准化
+      use_eval_augmentation: false # 评估时不使用上述transforms
+      use_acceptance_augmentation: false # 验收时不使用上述transforms
+
   infer:                         # 推理相关参数
     face_library_path:           # 人脸库特征文件路径 (用于 ArcFace 推理和对比)
     recognition_threshold: 0.0   # 人脸识别阈值 (ArcFace 推理)

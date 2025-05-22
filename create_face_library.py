@@ -177,14 +177,21 @@ def create_face_library(config: ConfigObject, cmd_args: argparse.Namespace):
     model_backbone.eval()
 
     # --- 数据准备 ---
-    # 默认使用训练列表建库，除非配置中指定了其他列表
-    data_list_for_library_name = "trainer.list" # 默认值，与CreateDataList.py的输出匹配
-    if hasattr(config, 'create_library') and config.create_library and config.create_library.get('data_list_for_library'):
-        data_list_for_library_name = config.create_library.get('data_list_for_library')
+    # 确定用于建库的数据列表文件名
+    # 优先级: 命令行参数 > config.dataset_params.train_list > 默认值 "trainer.list" (忽略 config.create_library)
+    data_list_for_library_name = cmd_args.data_list_for_library
+    if data_list_for_library_name is None:
+        if hasattr(config, 'dataset_params') and config.dataset_params and config.dataset_params.get('train_list'):
+            data_list_for_library_name = config.dataset_params.get('train_list')
+        else:
+            data_list_for_library_name = "trainer.list" # 最终默认值
 
     data_root_for_lists = cmd_args.data_dir or config.data_dir
     class_name_for_lists = config.class_name # 通常是 'face'
     
+    # 根据 data_root 和 class_name 构建完整路径
+    # 注意: dataset_params.train_list/eval_list 已经是相对于 data_dir/class_name 的路径 (例如 trainer.list)
+    # create_face_library.py 的 data_list_for_library 参数/配置项 也预期是这样的文件名
     actual_library_data_list_path = os.path.join(data_root_for_lists, class_name_for_lists, data_list_for_library_name)
 
     if not os.path.exists(actual_library_data_list_path):
@@ -253,6 +260,9 @@ def create_face_library(config: ConfigObject, cmd_args: argparse.Namespace):
     try:
         with open(final_output_library_path, 'wb') as f_lib:
             pickle.dump((library_features_np, library_labels_ids_np), f_lib)
+            # 尝试强制文件系统同步，确保数据已写入磁盘
+            f_lib.flush() # 先刷新缓冲区
+            os.fsync(f_lib.fileno()) # 再强制同步到磁盘
         print(f"人脸特征库已成功保存到: {final_output_library_path} (包含 {library_features_np.shape[0]} 个特征)。")
     except Exception as e_save:
         raise IOError(f"保存人脸特征库到 {final_output_library_path} 失败: {e_save}")

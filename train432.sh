@@ -21,7 +21,7 @@ fi
 
 # --- 定义参数集合用于组合生成 ---
 # 这些集合必须与 default_config.yaml 中特定配置块名称的构成逻辑和值完全一致。
-model_types=("vgg" "resnet")
+model_types=("resnet")
 
 # 使用代码简写和对应的全称，方便命名和配置修改
 loss_codes=("ce" "arcface")
@@ -35,7 +35,7 @@ scheduler_types=("StepDecay" "MultiStepDecay" "CosineAnnealingDecay" "ReduceOnPl
 
 # 学习率 (LR) 和权重衰减 (WD) 的代码与值
 lr_codes=("lr1" "lr2" "lr3")
-lr_values=("0.1" "0.01" "0.001") # Values for YAML override
+lr_values=("0.001" "0.0001" "0.00001") # Values for YAML override
 
 wd_codes=("wd1" "wd2" "wd3")
 wd_values=("0.0001" "0.001" "0.01") # Values for YAML override

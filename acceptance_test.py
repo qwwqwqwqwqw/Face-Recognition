@@ -190,24 +190,84 @@ def run_acceptance_evaluation(config: ConfigObject, cmd_args: argparse.Namespace
         if not feature_library_path:
             print("错误: ArcFace 模型验收需要指定特征库文件路径。未通过命令行参数 --feature_library_path 指定。")
             return
-        if not os.path.exists(feature_library_path):
-            print(f"错误: 指定的特征库文件不存在: {feature_library_path}")
-            return
 
+        print(f"当前工作目录: {os.getcwd()}")
+        print(f"尝试加载特征库的完整路径: {feature_library_path}")
         print(f"正在加载特征库文件: {feature_library_path}")
-        try:
-            with open(feature_library_path, 'rb') as f:
-                feature_library = pickle.load(f)
-            print(f"特征库加载成功，包含 {len(feature_library['features'])} 个特征向量和 {len(feature_library['labels'])} 个标签。")
-            # 假设特征库格式为 {'features': list of np.ndarray, 'labels': list of int, 'image_paths': list of str}
-            # 将特征转换为 Paddle Tensor 以便批量计算相似度
-            library_features = paddle.to_tensor(np.array(feature_library['features']), dtype='float32')
-            library_labels = feature_library['labels']
-            # library_image_paths = feature_library.get('image_paths', None) # 可选，用于调试
 
-        except Exception as e:
-            print(f"加载或解析特征库文件 {feature_library_path} 失败: {e}")
-            return
+        load_success = False
+        retry_count = 0
+
+        # 增加重试机制以应对文件系统同步延迟问题，尤其是在 WSL/网络文件系统等环境下
+        max_retries = 10 # 增加重试次数
+        retry_delay_seconds = 2.0 # 增加每次重试的延迟到 2.0 秒
+        initial_delay_seconds = 2.0 # 在第一次尝试加载前增加初始延迟
+
+        print(f"加载文件前等待 {initial_delay_seconds} 秒...")
+        time.sleep(initial_delay_seconds)
+
+        print(f"开始尝试加载特征库文件 (最多重试 {max_retries} 次, 间隔 {retry_delay_seconds} 秒)... ")
+
+        while retry_count < max_retries:
+            try:
+                # 直接尝试打开文件，让操作系统抛出 FileNotFoundError
+                with open(feature_library_path, 'rb') as f:
+                    feature_library = pickle.load(f) # 加载得到的是元组 (features_array, labels_array)
+
+                # 假设特征库格式为 (features_array, labels_array)
+                library_features_np = feature_library[0] # 获取特征数组 (numpy array)
+                library_labels = feature_library[1].tolist() # 获取标签数组并转换为列表
+
+                # 将特征数组转换为 Paddle Tensor
+                library_features = paddle.to_tensor(library_features_np, dtype='float32')
+
+                # 检查特征库是否为空
+                if library_features.shape[0] == 0:
+                    print("错误: 加载的特征库为空，无法进行比对识别验收。")
+                    return None # 返回 None 表示验收失败，让调用者处理
+
+                # 如果try块执行到这里，说明加载成功
+                print(f"特征库加载成功，包含 {len(library_labels)} 个样本 (在第 {retry_count + 1} 次尝试时加载)。") # 使用标签数量作为样本数更准确
+                load_success = True
+                break # 加载成功，退出重试循环
+
+            except FileNotFoundError as fnf_error:
+                # 明确捕获 FileNotFoundError
+                print(f"警告: 特征库文件 {feature_library_path} 在第 {retry_count + 1} 次尝试时报告 FileNotFoundError: {fnf_error}. 等待 {retry_delay_seconds} 秒后重试...")
+                # 在重试前进行额外的文件系统检查和日志记录
+                try:
+                    # 尝试获取文件状态
+                    file_stat = os.stat(feature_library_path)
+                    print(f"  -> Python os.stat() 成功获取文件状态: {file_stat}")
+                except FileNotFoundError:
+                    print(f"  -> Python os.stat() 在尝试 {retry_count + 1} 时也报告 FileNotFoundError。")
+                except Exception as stat_e:
+                    print(f"  -> Python os.stat() 在尝试 {retry_count + 1} 时遇到其他错误: {stat_e}")
+                
+                # 尝试列出目录内容
+                try:
+                    parent_dir = os.path.dirname(feature_library_path)
+                    if parent_dir and os.path.exists(parent_dir):
+                        dir_contents = os.listdir(parent_dir)
+                        print(f"  -> 父目录 {parent_dir} 内容 (前10项): {dir_contents[:10]}")
+                    elif parent_dir:
+                        print(f"  -> 父目录 {parent_dir} 不存在或无法访问。")
+                    else:
+                        print(f"  -> 无法确定父目录以进行列表。")
+                except Exception as listdir_e:
+                    print(f"  -> Python os.listdir() 在尝试 {retry_count + 1} 时遇到错误: {listdir_e}")
+
+                time.sleep(retry_delay_seconds)
+                retry_count += 1
+            except Exception as e:
+                # 捕获其他可能的加载错误 (如 pickle.UnpicklingError 等)
+                print(f"警告: 在第 {retry_count + 1} 次尝试加载或解析特征库文件 {feature_library_path} 时发生非文件找不到错误: {e}. 等待 {retry_delay_seconds} 秒后重试...")
+                time.sleep(retry_delay_seconds)
+                retry_count += 1
+
+        if not load_success:
+            print(f"错误: 达到最大重试次数 ({max_retries}) 后，仍无法加载特征库文件 {feature_library_path}. 验收测试终止。")
+            return None
 
         # 5. 执行比对识别循环
         backbone_instance.eval()
