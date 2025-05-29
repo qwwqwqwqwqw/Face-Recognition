@@ -264,13 +264,28 @@ def create_data_loader(config: ConfigObject, mode: str = 'train'):
               print(f"Using total_classes from config.num_classes: {total_classes} as fallback.")
 
 
+    # --- Add a custom collate_fn for batching Tensors ---
+    def custom_collate_fn(batch):
+        """Manually collate data into batches."""
+        # Filter out None values if any samples failed to load
+        batch = [data for data in batch if data is not None]
+        if not batch:
+            return None, None # Return None or handle empty batch appropriately
+        images, labels = zip(*batch) # Unzip the batch of (img, label) tuples
+        # Stack individual tensors into batch tensors
+        images = paddle.stack(images, axis=0)
+        labels = paddle.stack(labels, axis=0)
+        return images, labels
+    # --- End custom_collate_fn ---
+
     # 创建数据加载器
     data_loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=dataset_params.num_workers,
-        drop_last=mode == 'train'
+        drop_last=mode == 'train',
+        collate_fn=custom_collate_fn # Always use custom collate for explicit batching
     )
 
     print(f"Created DataLoader for mode '{mode}' with {len(dataset)} samples and {total_classes} classes.")
