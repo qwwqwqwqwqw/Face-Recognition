@@ -136,6 +136,12 @@ def train_one_epoch(model: nn.Layer, head: nn.Layer | None, train_loader: paddle
 
     print(f"\n--- Epoch {epoch + 1}/{config.epochs} --- LR: {optimizer.get_lr():.6f} ---")
 
+    for batch_id, batch in enumerate(train_loader):
+        print(">>> 一个 batch 的元素数：", len(batch))
+        for i, x in enumerate(batch):
+            print(f"  - batch[{i}] 的 type:", type(x), " shape:", getattr(x, "shape", None))
+        break
+
     for batch_id, (images, labels) in enumerate(train_loader):
         batch_start_time = time.time()
         global_step = epoch * len(train_loader) + batch_id
@@ -331,9 +337,9 @@ def train(final_config: ConfigObject, cmd_line_args: argparse.Namespace):
     log_writer.flush()
 
     print("\n正在创建训练数据加载器...")
-    train_loader = MyReader.create_data_loader(final_config, mode='train')
+    train_loader,_ = MyReader.create_data_loader(final_config, mode='train')
     print("\n正在创建测试数据加载器...")
-    eval_loader = MyReader.create_data_loader(final_config, mode='eval')
+    eval_loader,_= MyReader.create_data_loader(final_config, mode='eval')
 
     model_backbone, backbone_out_dim = get_backbone(
         final_config.model.get(f'{final_config.model_type}_params', {}),
