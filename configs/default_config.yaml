@@ -97,7 +97,8 @@ global_settings:
       start_lr: 0.001            # 预热开始时的学习率
       #在预热阶段，学习率会从 start_lr 线性增加到 initial_learning_rate。这有助于模型在训练初期稳定。
 
-  model_type: resnet             # 默认模型骨干类型 (vgg 或 resnet)
+  #model_type: resnet      # 默认模型骨干类型 (vgg 或 resnet)
+  model_type: resnet_cbam          # ← 从 "resnet" 改成 "resnet_cbam
   # VGG: 结构简单，参数少，计算量小，但性能相对较差。
   # ResNet: 结构复杂，参数多，计算量大，但性能更好。
   # 在选择模型时，需要权衡模型的复杂度和性能。
@@ -119,7 +120,10 @@ global_settings:
       n_resnet_blocks: 3         # ResNet block 的数量 (不包含stem和最后的avgpool)
 #增大 n_resnet_blocks: 增加网络深度#(ResNet 块数量): 控制 ResNet 的深度，影响模型容量和计算量。
 #常见的数量是 2, 3, 4。
-
+    resnet_cbam_params: # ← 添加这一块
+      nf: 32
+      n_resnet_blocks: 3   # 注意这里要和 factory 中用的 key 一致
+      feature_dim: 512
 #nf 和 n_resnet_blocks 都是影响 ResNet 模型大小和能力的参数，调整它们可以改变模型的复杂度和表达能力。
 
   loss_type: arcface             # 默认损失/头部类型 (cross_entropy 或 arcface)

@@ -56,10 +56,10 @@ class CreateDataList:
                          test_list_name: str = "test.list",
                          # acceptance_list_name: str = "acceptance.list", # 新增验收集列表文件名
                          meta_file_name: str = "readme.json",
-                         train_ratio: float = 0.7, # 调整默认训练集比例
+                         train_ratio: float = 0.7,  # 调整默认训练集比例
                          test_ratio: float = 0.3,  # 将验收集和测试集合并，使用一个 test_ratio
                          output_num_classes_file: str = None,
-                         output_dir: str = None) -> None:
+                         output_dir: str = None, acceptance_list_path=None) -> None:
         """
         生成训练、测试数据列表文件，以及一个包含类别映射的元数据JSON文件。
 
